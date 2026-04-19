@@ -13,15 +13,25 @@ export const metadata: Metadata = {
   title: "Weber Leads",
   description: "מערכת לידים אישית — Weber Tours",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
+      { url: "/icons/icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
+    ],
+    apple: [
+      { url: "/icons/icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
+    ],
+  },
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "Weber",
+    startupImage: ["/icons/icon-512.svg"],
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0a0a",
+  themeColor: "#1e3a8a",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,

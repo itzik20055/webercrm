@@ -169,6 +169,12 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
 
+export const appSettings = pgTable("app_settings", {
+  key: text().primaryKey(),
+  value: text().notNull(),
+  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+});
+
 export const aiAuditLog = pgTable(
   "ai_audit_log",
   {
@@ -214,6 +220,7 @@ export type NewFollowup = typeof followups.$inferInsert;
 export type ProductKb = typeof productKb.$inferSelect;
 export type ResponseTemplate = typeof responseTemplates.$inferSelect;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
+export type AppSetting = typeof appSettings.$inferSelect;
 
 export const LANGUAGE_LABELS: Record<Lead["language"], string> = {
   he: "עברית",

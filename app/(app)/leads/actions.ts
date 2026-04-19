@@ -248,6 +248,203 @@ export async function scheduleFollowup(formData: FormData) {
   revalidatePath("/");
 }
 
+const importSchema = z.object({
+  name: z.string().min(1).max(120),
+  phone: z.string().min(5).max(40),
+  language: z.enum(["he", "en", "yi"]),
+  audience: z.enum(["israeli_haredi", "american_haredi", "european_haredi"]),
+  status: z.enum([
+    "new",
+    "contacted",
+    "interested",
+    "quoted",
+    "closing",
+    "booked",
+    "lost",
+  ]),
+  priority: z.enum(["hot", "warm", "cold"]),
+  numAdults: z.coerce.number().int().min(0).nullish(),
+  numChildren: z.coerce.number().int().min(0).nullish(),
+  agesChildren: z.string().nullish(),
+  datesInterest: z.string().nullish(),
+  roomTypeInterest: z.string().nullish(),
+  budgetSignal: z.enum(["low", "mid", "high"]).nullish(),
+  interestTags: z.array(z.string()).default([]),
+  whatSpokeToThem: z.string().nullish(),
+  objections: z.string().nullish(),
+  // Logged content
+  chatTranscript: z.string().min(1),
+  // Optional followup
+  followupAt: z.string().nullish(),
+  followupReason: z.string().nullish(),
+});
+
+export async function createLeadFromImport(formData: FormData) {
+  const obj: Record<string, unknown> = {};
+  formData.forEach((value, key) => {
+    if (key === "interestTags") {
+      const arr = (obj.interestTags as string[]) ?? [];
+      arr.push(String(value));
+      obj.interestTags = arr;
+    } else {
+      obj[key] = value;
+    }
+  });
+  const parsed = importSchema.parse(obj);
+
+  const [created] = await db
+    .insert(leads)
+    .values({
+      name: parsed.name,
+      phone: parsed.phone,
+      language: parsed.language,
+      audience: parsed.audience,
+      channelFirst: "whatsapp",
+      status: parsed.status,
+      priority: parsed.priority,
+      numAdults: parsed.numAdults ?? null,
+      numChildren: parsed.numChildren ?? null,
+      agesChildren: parsed.agesChildren ?? null,
+      datesInterest: parsed.datesInterest ?? null,
+      roomTypeInterest: parsed.roomTypeInterest ?? null,
+      budgetSignal: parsed.budgetSignal ?? null,
+      interestTags: parsed.interestTags,
+      whatSpokeToThem: parsed.whatSpokeToThem ?? null,
+      objections: parsed.objections ?? null,
+    })
+    .returning({ id: leads.id });
+
+  await db.insert(interactions).values({
+    leadId: created.id,
+    type: "whatsapp",
+    direction: "internal",
+    content: parsed.chatTranscript,
+    aiSummary: parsed.whatSpokeToThem ?? null,
+  });
+
+  if (parsed.followupAt) {
+    const due = new Date(parsed.followupAt);
+    if (!isNaN(due.getTime())) {
+      await db.insert(followups).values({
+        leadId: created.id,
+        dueAt: due,
+        reason: parsed.followupReason ?? null,
+      });
+      await db
+        .update(leads)
+        .set({ nextFollowupAt: due, updatedAt: new Date() })
+        .where(eq(leads.id, created.id));
+    }
+  }
+
+  revalidatePath("/leads");
+  revalidatePath("/");
+  redirect(`/leads/${created.id}`);
+}
+
+const mergeImportSchema = z.object({
+  leadId: z.string().uuid(),
+  // Optional updates — only applied if non-empty (we don't overwrite existing data)
+  language: z.enum(["he", "en", "yi"]).optional(),
+  audience: z.enum(["israeli_haredi", "american_haredi", "european_haredi"]).optional(),
+  status: z
+    .enum(["new", "contacted", "interested", "quoted", "closing", "booked", "lost"])
+    .optional(),
+  priority: z.enum(["hot", "warm", "cold"]).optional(),
+  numAdults: z.coerce.number().int().min(0).nullish(),
+  numChildren: z.coerce.number().int().min(0).nullish(),
+  agesChildren: z.string().nullish(),
+  datesInterest: z.string().nullish(),
+  roomTypeInterest: z.string().nullish(),
+  budgetSignal: z.enum(["low", "mid", "high"]).nullish(),
+  interestTags: z.array(z.string()).default([]),
+  whatSpokeToThem: z.string().nullish(),
+  objections: z.string().nullish(),
+  chatTranscript: z.string().min(1),
+  followupAt: z.string().nullish(),
+  followupReason: z.string().nullish(),
+});
+
+export async function mergeImportIntoLead(formData: FormData) {
+  const obj: Record<string, unknown> = {};
+  formData.forEach((value, key) => {
+    if (key === "interestTags") {
+      const arr = (obj.interestTags as string[]) ?? [];
+      arr.push(String(value));
+      obj.interestTags = arr;
+    } else {
+      obj[key] = value;
+    }
+  });
+  const parsed = mergeImportSchema.parse(obj);
+
+  const [existing] = await db.select().from(leads).where(eq(leads.id, parsed.leadId));
+  if (!existing) throw new Error("הליד לא נמצא");
+
+  // Merge tags (union)
+  const mergedTags = Array.from(
+    new Set([...(existing.interestTags ?? []), ...parsed.interestTags])
+  );
+
+  // For trip details, prefer the new value only if it's a non-empty string
+  // and the existing field is null. Don't overwrite existing data silently.
+  const update: Record<string, unknown> = {
+    updatedAt: new Date(),
+    interestTags: mergedTags,
+  };
+  if (parsed.status) update.status = parsed.status;
+  if (parsed.priority) update.priority = parsed.priority;
+  if (parsed.language) update.language = parsed.language;
+  if (parsed.audience) update.audience = parsed.audience;
+
+  const fillIfEmpty = <K extends keyof typeof existing>(
+    field: K,
+    next: unknown
+  ) => {
+    if ((existing as Record<string, unknown>)[field as string] == null && next != null && next !== "") {
+      update[field as string] = next;
+    }
+  };
+  fillIfEmpty("numAdults", parsed.numAdults);
+  fillIfEmpty("numChildren", parsed.numChildren);
+  fillIfEmpty("agesChildren", parsed.agesChildren);
+  fillIfEmpty("datesInterest", parsed.datesInterest);
+  fillIfEmpty("roomTypeInterest", parsed.roomTypeInterest);
+  fillIfEmpty("budgetSignal", parsed.budgetSignal);
+  fillIfEmpty("whatSpokeToThem", parsed.whatSpokeToThem);
+  fillIfEmpty("objections", parsed.objections);
+
+  await db.update(leads).set(update).where(eq(leads.id, parsed.leadId));
+
+  await db.insert(interactions).values({
+    leadId: parsed.leadId,
+    type: "whatsapp",
+    direction: "internal",
+    content: parsed.chatTranscript,
+    aiSummary: parsed.whatSpokeToThem ?? null,
+  });
+
+  if (parsed.followupAt) {
+    const due = new Date(parsed.followupAt);
+    if (!isNaN(due.getTime())) {
+      await db.insert(followups).values({
+        leadId: parsed.leadId,
+        dueAt: due,
+        reason: parsed.followupReason ?? null,
+      });
+      await db
+        .update(leads)
+        .set({ nextFollowupAt: due, followupCompletedAt: null, updatedAt: new Date() })
+        .where(eq(leads.id, parsed.leadId));
+    }
+  }
+
+  revalidatePath("/leads");
+  revalidatePath(`/leads/${parsed.leadId}`);
+  revalidatePath("/");
+  redirect(`/leads/${parsed.leadId}`);
+}
+
 export async function completeFollowup(followupId: string, leadId: string) {
   await db
     .update(followups)

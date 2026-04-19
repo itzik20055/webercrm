@@ -14,22 +14,34 @@
       <stop offset="1" stop-color="#f4f6fb"/>
     </linearGradient>
   </defs>
+
+  <!-- White background, rounded for iOS/Android masks -->
   <rect width="512" height="512" rx="112" fill="url(#bgsoft)"/>
+
+  <!-- WEBER -->
   <text x="256" y="210"
         font-family="Impact, 'Arial Black', 'Helvetica Neue', sans-serif"
         font-weight="900" font-size="138" letter-spacing="2"
         text-anchor="middle" fill="url(#navy)">WEBER</text>
+
+  <!-- TOURS -->
   <text x="256" y="340"
         font-family="Impact, 'Arial Black', 'Helvetica Neue', sans-serif"
         font-weight="900" font-size="138" letter-spacing="2"
         text-anchor="middle" fill="url(#navy)">TOURS</text>
+
+  <!-- Gold swoosh under TOURS -->
   <path d="M 90 388 Q 256 432 422 388"
         stroke="url(#gold)" stroke-width="9" fill="none" stroke-linecap="round"/>
+
+  <!-- Stylized airplane on the swoosh -->
   <g transform="translate(330 372) rotate(-12)">
     <path d="M 0 0 L 70 -8 L 90 -2 L 70 4 L 0 0 Z" fill="url(#gold)"/>
     <path d="M 30 -2 L 38 -18 L 46 -16 L 42 -4 Z" fill="url(#gold)"/>
     <path d="M 50 2 L 56 14 L 62 12 L 60 0 Z" fill="url(#gold)"/>
   </g>
+
+  <!-- Bottom decorative bar with diamond ends -->
   <rect x="64" y="438" width="384" height="5" fill="url(#gold)"/>
   <path d="M 50 440 L 64 430 L 78 440 L 64 450 Z" fill="url(#gold)"/>
   <path d="M 434 440 L 448 430 L 462 440 L 448 450 Z" fill="url(#gold)"/>

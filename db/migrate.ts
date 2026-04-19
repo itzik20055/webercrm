@@ -1,4 +1,6 @@
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: ".env.local" });
+config({ path: ".env" });
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { migrate } from "drizzle-orm/neon-http/migrator";

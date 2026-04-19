@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Plus, Search, Users, Phone, MessageCircle } from "lucide-react";
+import { Plus, Search, Users, Phone, MessageCircle, Sparkles } from "lucide-react";
 import { db, leads } from "@/db";
 import { and, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
@@ -70,12 +70,20 @@ export default async function LeadsListPage({
     <div className="px-4 pt-4 pb-4 space-y-4">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">לידים</h1>
-        <Button asChild size="sm" className="rounded-full">
-          <Link href="/leads/new">
-            <Plus className="size-4" />
-            חדש
-          </Link>
-        </Button>
+        <div className="flex gap-2">
+          <Button asChild size="sm" variant="outline" className="rounded-full">
+            <Link href="/leads/import">
+              <Sparkles className="size-4" />
+              ייבוא AI
+            </Link>
+          </Button>
+          <Button asChild size="sm" className="rounded-full">
+            <Link href="/leads/new">
+              <Plus className="size-4" />
+              חדש
+            </Link>
+          </Button>
+        </div>
       </header>
 
       <form className="relative">
@@ -139,52 +147,50 @@ export default async function LeadsListPage({
           />
         ) : (
           rows.map((l) => (
-            <Link
+            <div
               key={l.id}
-              href={`/leads/${l.id}`}
-              className="block p-3 rounded-lg bg-card border hover:bg-accent transition active:scale-[0.99]"
+              className="flex items-start gap-2 p-3 rounded-lg bg-card border hover:bg-accent transition"
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium">{l.name}</span>
-                    <StatusBadge status={l.status} />
-                    {l.priority === "hot" && <PriorityBadge priority="hot" />}
-                  </div>
-                  <div className="text-sm text-muted-foreground mt-1">
-                    {l.phone}
-                  </div>
-                  {l.notes && (
-                    <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
-                      {l.notes}
-                    </p>
-                  )}
-                  <div className="text-xs text-muted-foreground mt-1.5">
-                    עודכן {smartDate(l.updatedAt)}
-                  </div>
+              <Link
+                href={`/leads/${l.id}`}
+                className="min-w-0 flex-1 active:scale-[0.99]"
+              >
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium">{l.name}</span>
+                  <StatusBadge status={l.status} />
+                  {l.priority === "hot" && <PriorityBadge priority="hot" />}
                 </div>
-                <div className="flex flex-col gap-1.5 shrink-0">
-                  <a
-                    href={telLink(l.phone)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center"
-                    aria-label="חייג"
-                  >
-                    <Phone className="size-4" />
-                  </a>
-                  <a
-                    href={whatsappLink(l.phone)}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="size-9 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center"
-                    aria-label="וואטסאפ"
-                  >
-                    <MessageCircle className="size-4" />
-                  </a>
+                <div className="text-sm text-muted-foreground mt-1">
+                  {l.phone}
                 </div>
+                {l.notes && (
+                  <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
+                    {l.notes}
+                  </p>
+                )}
+                <div className="text-xs text-muted-foreground mt-1.5">
+                  עודכן {smartDate(l.updatedAt)}
+                </div>
+              </Link>
+              <div className="flex flex-col gap-1.5 shrink-0">
+                <a
+                  href={telLink(l.phone)}
+                  className="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center"
+                  aria-label="חייג"
+                >
+                  <Phone className="size-4" />
+                </a>
+                <a
+                  href={whatsappLink(l.phone)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="size-9 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center"
+                  aria-label="וואטסאפ"
+                >
+                  <MessageCircle className="size-4" />
+                </a>
               </div>
-            </Link>
+            </div>
           ))
         )}
       </div>

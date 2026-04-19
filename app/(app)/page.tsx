@@ -102,54 +102,52 @@ export default async function HomePage() {
             const overdue = new Date(f.dueAt) < new Date();
             const goodTime = isGoodTimeToCall(f.leadAudience);
             return (
-              <Link
+              <div
                 key={f.id}
-                href={`/leads/${f.leadId}`}
-                className="block p-3 rounded-lg bg-card border hover:bg-accent transition active:scale-[0.99]"
+                className="flex items-start gap-2 p-3 rounded-lg bg-card border hover:bg-accent transition"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium truncate">{f.leadName}</span>
-                      <StatusBadge status={f.leadStatus} />
-                    </div>
-                    {f.reason && (
-                      <p className="text-sm text-muted-foreground mt-1 truncate">
-                        {f.reason}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                      <span className={overdue ? "text-destructive font-medium" : ""}>
-                        {smartDate(f.dueAt)}
-                      </span>
-                      <span>·</span>
-                      <span className={goodTime ? "" : "text-amber-600"}>
-                        {localTimeLabel(f.leadAudience)} {AUDIENCE_LABELS[f.leadAudience].split(" ")[1]}
-                      </span>
-                    </div>
+                <Link
+                  href={`/leads/${f.leadId}`}
+                  className="min-w-0 flex-1 active:scale-[0.99]"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium truncate">{f.leadName}</span>
+                    <StatusBadge status={f.leadStatus} />
                   </div>
-                  <div className="flex gap-1.5">
-                    <a
-                      href={telLink(f.leadPhone)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center"
-                      aria-label="חייג"
-                    >
-                      📞
-                    </a>
-                    <a
-                      href={whatsappLink(f.leadPhone)}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="size-9 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center"
-                      aria-label="וואטסאפ"
-                    >
-                      💬
-                    </a>
+                  {f.reason && (
+                    <p className="text-sm text-muted-foreground mt-1 truncate">
+                      {f.reason}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
+                    <span className={overdue ? "text-destructive font-medium" : ""}>
+                      {smartDate(f.dueAt)}
+                    </span>
+                    <span>·</span>
+                    <span className={goodTime ? "" : "text-amber-600"}>
+                      {localTimeLabel(f.leadAudience)} {AUDIENCE_LABELS[f.leadAudience].split(" ")[1]}
+                    </span>
                   </div>
+                </Link>
+                <div className="flex gap-1.5 shrink-0">
+                  <a
+                    href={telLink(f.leadPhone)}
+                    className="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center"
+                    aria-label="חייג"
+                  >
+                    📞
+                  </a>
+                  <a
+                    href={whatsappLink(f.leadPhone)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="size-9 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center"
+                    aria-label="וואטסאפ"
+                  >
+                    💬
+                  </a>
                 </div>
-              </Link>
+              </div>
             );
           })
         )}

@@ -1,9 +1,19 @@
-import { LogOut, Smartphone, BellRing, Database } from "lucide-react";
+import { LogOut, Smartphone, BellRing, Database, MessageCircle } from "lucide-react";
 import { db, pushSubscriptions, leads } from "@/db";
 import { sql } from "drizzle-orm";
 import { PushToggle } from "@/components/push-toggle";
+import { getSetting, setSetting } from "@/lib/settings";
+import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
+
+async function saveWhatsAppName(formData: FormData) {
+  "use server";
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) return;
+  await setSetting("whatsapp_display_name", name);
+  revalidatePath("/settings");
+}
 
 export default async function SettingsPage() {
   const [stats] = await db
@@ -15,10 +25,45 @@ export default async function SettingsPage() {
     .limit(1);
 
   const vapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const whatsappName = await getSetting("whatsapp_display_name");
+  const hasGatewayKey = !!process.env.AI_GATEWAY_API_KEY;
 
   return (
     <div className="px-4 pt-4 pb-4 space-y-5">
       <h1 className="text-2xl font-bold">הגדרות</h1>
+
+      <Section title="ייבוא וואטסאפ + AI" icon={<MessageCircle className="size-4" />}>
+        <p className="text-sm text-muted-foreground">
+          השם שלך כפי שהוא מופיע בוואטסאפ ללקוחות. נחוץ כדי שה-AI ידע מה אתה
+          שלחת ומה הלקוח שלח.
+        </p>
+        <form action={saveWhatsAppName} className="space-y-2">
+          <input
+            name="name"
+            type="text"
+            defaultValue={whatsappName ?? ""}
+            placeholder="לדוגמה: איציק וובר"
+            className="w-full h-11 px-3 rounded-lg border bg-background"
+            dir="rtl"
+          />
+          <button
+            type="submit"
+            className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-medium active:scale-[0.99]"
+          >
+            שמור
+          </button>
+        </form>
+        <div className="text-xs text-muted-foreground pt-2 border-t">
+          מפתח Vercel AI Gateway:{" "}
+          {hasGatewayKey ? (
+            <span className="text-emerald-600 font-medium">מוגדר ✓</span>
+          ) : (
+            <span className="text-amber-600 font-medium">
+              חסר — הוסף AI_GATEWAY_API_KEY ב-.env.local
+            </span>
+          )}
+        </div>
+      </Section>
 
       <Section title="התראות" icon={<BellRing className="size-4" />}>
         <p className="text-sm text-muted-foreground">
