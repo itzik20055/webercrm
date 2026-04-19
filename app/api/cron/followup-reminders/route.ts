@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const now = new Date();
-  const windowStart = new Date(now.getTime() - 6 * 60 * 1000);
+  const sanityFloor = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
   const due = await db
     .select({
@@ -24,12 +24,14 @@ export async function GET() {
         isNull(followups.completedAt),
         isNull(followups.reminderSentAt),
         lte(followups.dueAt, now),
-        gte(followups.dueAt, windowStart)
+        gte(followups.dueAt, sanityFloor)
       )
     )
-    .limit(20);
+    .limit(50);
 
-  const results: Array<{ id: string; sent: number; failed: number }> = [];
+  console.log(`[cron] tick at ${now.toISOString()} — found ${due.length} due followup(s)`);
+
+  const results: Array<{ id: string; lead: string; sent: number; failed: number }> = [];
 
   for (const f of due) {
     try {
@@ -43,11 +45,12 @@ export async function GET() {
         .update(followups)
         .set({ reminderSentAt: new Date() })
         .where(eq(followups.id, f.id));
-      results.push({ id: f.id, sent: r.sent, failed: r.failed });
+      console.log(`[cron] sent followup ${f.id} (${f.leadName}) → ${r.sent} device(s), ${r.failed} failed, ${r.removed} removed`);
+      results.push({ id: f.id, lead: f.leadName, sent: r.sent, failed: r.failed });
     } catch (err) {
-      console.error("push failed", f.id, err);
+      console.error(`[cron] push failed for ${f.id}`, err);
     }
   }
 
-  return NextResponse.json({ ok: true, processed: due.length, results });
+  return NextResponse.json({ ok: true, now: now.toISOString(), processed: due.length, results });
 }
