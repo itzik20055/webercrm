@@ -1,36 +1,138 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Weber Leads
 
-## Getting Started
+מערכת לידים אישית לעונה של Weber Tours — נופש כשר באלפים האוסטריים, סנט אנטון.
 
-First, run the development server:
+PWA לטלפון. עברית RTL. כוללת ניהול לידים, היסטוריית שיחות, פולואפים עם push notifications, ו-3 אזורי זמן (חרדים ישראלים/אמריקאים/אירופאים).
+
+## הוראות הקמה
+
+### 1. חשבונות (חינם)
+
+- **GitHub** — https://github.com/signup
+- **Vercel** — https://vercel.com/signup (Sign in with GitHub)
+- **Neon** — דרך Vercel Marketplace אחרי יצירת הפרויקט (ראה למטה)
+
+### 2. דחיפה ל-GitHub
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# ב-C:\Users\itzik\weber
+git add .
+git commit -m "Initial Weber Leads"
+gh repo create weber-leads --private --source=. --remote=origin --push
+# או ידנית: צור repo ב-github.com, אחר כך:
+# git remote add origin https://github.com/USERNAME/weber-leads.git
+# git push -u origin main
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. חיבור ל-Vercel + Neon
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. לך ל-https://vercel.com/new
+2. ייבא את ה-repo `weber-leads` מ-GitHub
+3. **לפני שתפרוס**, לך ל-Storage → Add Database → **Neon Postgres**
+4. בחר תוכנית חינם (500MB), קשר לפרויקט. Vercel יוסיף `DATABASE_URL` אוטומטית.
+5. לחץ Deploy. הפריסה הראשונה תיכשל כי חסרים עוד env vars — זה בסדר.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 4. הוספת משתני סביבה
 
-## Learn More
+ב-Vercel → Project Settings → Environment Variables, הוסף:
 
-To learn more about Next.js, take a look at the following resources:
+| משתנה | ערך | לאיזה Environment |
+|-------|------|-------------------|
+| `APP_PASSWORD` | סיסמה ארוכה (16+ תווים) | All |
+| `SESSION_SECRET` | מחרוזת אקראית 32+ תווים | All |
+| `CRON_SECRET` | מחרוזת אקראית | Production |
+| `VAPID_SUBJECT` | `mailto:itzik20055@gmail.com` | All |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | (ראה צעד 5) | All |
+| `VAPID_PRIVATE_KEY` | (ראה צעד 5) | All |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+ליצירת מחרוזות אקראיות ב-bash:
+```bash
+openssl rand -base64 32
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 5. יצירת מפתחות VAPID (להתראות Push)
 
-## Deploy on Vercel
+מקומית בפרויקט:
+```bash
+npm run vapid:generate
+```
+זה ידפיס שני מפתחות. שים אותם ב-Vercel.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 6. הרצת migrations במסד
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+קח את ה-`DATABASE_URL` של Neon מ-Vercel → Storage → .env.local, שמור בקובץ `.env.local` מקומי, ואז:
+
+```bash
+npm run db:migrate
+```
+
+### 7. פריסה מחדש
+
+ב-Vercel → Deployments → לחץ Redeploy על הפריסה האחרונה.
+
+### 8. התקנה בטלפון
+
+1. פתח את ה-URL (למשל `https://weber-leads.vercel.app`) בספארי iOS או Chrome אנדרואיד.
+2. הזן את הסיסמה.
+3. iOS: Share → Add to Home Screen. אנדרואיד: ⋮ → Install app.
+4. פתח מהמסך הבית.
+5. לך להגדרות → "הפעל התראות פולואפ".
+
+## פיתוח מקומי
+
+```bash
+cp .env.example .env.local
+# ערוך .env.local עם הערכים שלך
+npm run db:migrate
+npm run dev
+```
+
+פתח http://localhost:3000
+
+### פקודות שימושיות
+
+| פקודה | פעולה |
+|-------|-------|
+| `npm run dev` | שרת פיתוח |
+| `npm run build` | בניית פרודקשן |
+| `npm run db:generate` | צור migration חדש מהשינויים בסכמה |
+| `npm run db:migrate` | הפעל migrations על המסד |
+| `npm run db:push` | פוש סכמה ישירות (פיתוח בלבד) |
+| `npm run db:studio` | UI לבחינת המסד |
+| `npm run vapid:generate` | צור מפתחות VAPID חדשים |
+
+## ארכיטקטורה
+
+- **Next.js 16** App Router — PWA, RTL
+- **Drizzle ORM** + **Neon Postgres** — מסד נתונים serverless
+- **iron-session** — אימות פשוט בסיסמה אחת
+- **web-push** + **Vercel Cron** — תזכורות פולואפ
+- **shadcn/ui** + **Tailwind v4** — UI
+
+### מבנה תיקיות
+
+```
+app/
+  (app)/          — מסכים שדורשים אימות
+    page.tsx        דאשבורד
+    leads/          ניהול לידים
+    followups/      רשימת פולואפים
+    settings/       הגדרות + push
+  (auth)/login    כניסה
+  api/            push, cron, auth
+db/             סכמה + migrations
+lib/            anonymize, push, session, format
+components/     UI components + shadcn
+public/         manifest, sw, icons
+proxy.ts        Next.js proxy (אימות + cron auth)
+```
+
+## פרטיות
+
+- כל קוד פועל על Vercel/Neon — שום שירות צד שלישי אחר.
+- אין אינטגרציית AI מופעלת ב-MVP. יתווסף ב-V2 עם **שכבת אנונימיזציה אוטומטית** (ראה `lib/anonymize.ts`) ו-**Vercel AI Gateway Zero Data Retention**.
+- כל קריאות AI ייכתבו ל-`ai_audit_log` עם הגרסה המאונונמת בלבד.
+
+## שלבים הבאים (V2/V3)
+
+ראה `C:\Users\itzik\.claude\plans\lively-spinning-popcorn.md`
