@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { BellRing, BellOff } from "lucide-react";
+import { BellRing, BellOff, Send } from "lucide-react";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -86,17 +86,44 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string | undefi
     toast.success("התראות בוטלו");
   }
 
+  async function sendTest() {
+    try {
+      const r = await fetch("/api/push/test", { method: "POST" });
+      const json = await r.json();
+      if (r.ok && json.sent > 0) {
+        toast.success(`התראת בדיקה נשלחה (${json.sent} מכשירים)`);
+      } else if (json.sent === 0) {
+        toast.error("אין מכשירים מנויים");
+      } else {
+        toast.error(json.error ?? "שליחה נכשלה");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   if (subscribed) {
     return (
-      <button
-        type="button"
-        disabled={pending}
-        onClick={() => start(disable)}
-        className="w-full h-12 rounded-lg border flex items-center justify-center gap-2 font-medium active:scale-[0.99] transition"
-      >
-        <BellOff className="size-4" />
-        בטל התראות
-      </button>
+      <div className="space-y-2">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(sendTest)}
+          className="press w-full h-12 rounded-xl bg-primary text-primary-foreground flex items-center justify-center gap-2 font-semibold shadow-card"
+        >
+          <Send className="size-4" />
+          שלח התראת בדיקה
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(disable)}
+          className="press w-full h-11 rounded-xl border border-border flex items-center justify-center gap-2 text-sm font-medium text-muted-foreground"
+        >
+          <BellOff className="size-4" />
+          בטל התראות
+        </button>
+      </div>
     );
   }
 
