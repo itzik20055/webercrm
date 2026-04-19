@@ -10,6 +10,7 @@
     "db:migrate": "tsx db/migrate.ts",
     "db:studio": "drizzle-kit studio",
     "db:push": "drizzle-kit push",
+    "db:seed-kb": "tsx scripts/seed-kb.ts",
     "vapid:generate": "node -e \"const wp=require('web-push');const k=wp.generateVAPIDKeys();console.log('NEXT_PUBLIC_VAPID_PUBLIC_KEY='+k.publicKey);console.log('VAPID_PRIVATE_KEY='+k.privateKey);\"",
     "icons:generate": "tsx scripts/generate-icons.ts"
   },

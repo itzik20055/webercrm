@@ -1,5 +1,14 @@
-import { LogOut, Smartphone, BellRing, Database, MessageCircle } from "lucide-react";
-import { db, pushSubscriptions, leads } from "@/db";
+import Link from "next/link";
+import {
+  LogOut,
+  Smartphone,
+  BellRing,
+  Database,
+  MessageCircle,
+  BookOpen,
+  ChevronLeft,
+} from "lucide-react";
+import { db, pushSubscriptions, leads, productKb } from "@/db";
 import { sql } from "drizzle-orm";
 import { PushToggle } from "@/components/push-toggle";
 import { getSetting, setSetting } from "@/lib/settings";
@@ -20,6 +29,8 @@ export default async function SettingsPage() {
     .select({
       leadsTotal: sql<number>`(select count(*) from ${leads})::int`,
       subs: sql<number>`(select count(*) from ${pushSubscriptions})::int`,
+      kbActive: sql<number>`(select count(*) from ${productKb} where active = true)::int`,
+      kbTotal: sql<number>`(select count(*) from ${productKb})::int`,
     })
     .from(leads)
     .limit(1);
@@ -31,6 +42,22 @@ export default async function SettingsPage() {
   return (
     <div className="px-4 pt-4 pb-4 space-y-5">
       <h1 className="text-2xl font-bold">הגדרות</h1>
+
+      <Section title="ספר הידע" icon={<BookOpen className="size-4" />}>
+        <p className="text-sm text-muted-foreground">
+          הידע על המוצר שמוזרק לכל שיחה עם ה-AI. עדכן בכל פעם שמשהו משתנה.
+        </p>
+        <Link
+          href="/kb"
+          className="press flex items-center justify-between h-11 px-3.5 rounded-xl border border-border bg-background"
+        >
+          <span className="font-medium text-sm">פתח את ספר הידע</span>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
+            {stats?.kbActive ?? 0} / {stats?.kbTotal ?? 0} פעילים
+            <ChevronLeft className="size-4" />
+          </span>
+        </Link>
+      </Section>
 
       <Section title="ייבוא וואטסאפ + AI" icon={<MessageCircle className="size-4" />}>
         <p className="text-sm text-muted-foreground">

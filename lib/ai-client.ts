@@ -1,6 +1,7 @@
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
-import { db, aiAuditLog } from "@/db";
+import { eq } from "drizzle-orm";
+import { db, aiAuditLog, productKb } from "@/db";
 import { anonymize, deanonymize } from "./anonymize";
 
 /** Models we use through Vercel AI Gateway. */
@@ -20,6 +21,60 @@ function ensureGatewayKey() {
     throw new Error(
       "AI_GATEWAY_API_KEY is not set. Get a key at https://vercel.com/dashboard/ai/api-keys and add it to .env.local"
     );
+  }
+}
+
+const KB_TTL_MS = 60_000;
+let kbCache: { text: string; loadedAt: number } | null = null;
+
+const KB_CATEGORY_LABELS: Record<string, string> = {
+  hotel: "מלון ומיקום",
+  rooms: "חדרים",
+  food: "אוכל וכשרות",
+  activities: "טיולים ופעילויות",
+  prices: "מחירון",
+  logistics: "לוגיסטיקה (תפילות, שדות תעופה, תשתיות)",
+  faq: "שאלות, התנגדויות, מדיניות",
+};
+
+/**
+ * Loads the product knowledge base, formatted for system-prompt injection.
+ * Cached for 60s so back-to-back AI calls don't hammer the DB. Falls back to
+ * an empty block on failure — knowledge is augmentation, never a hard
+ * dependency.
+ */
+async function loadKnowledgeContext(): Promise<string> {
+  const now = Date.now();
+  if (kbCache && now - kbCache.loadedAt < KB_TTL_MS) return kbCache.text;
+  try {
+    const rows = await db
+      .select({
+        category: productKb.category,
+        title: productKb.title,
+        content: productKb.content,
+      })
+      .from(productKb)
+      .where(eq(productKb.active, true));
+    if (rows.length === 0) {
+      kbCache = { text: "", loadedAt: now };
+      return "";
+    }
+    const grouped = new Map<string, string[]>();
+    for (const r of rows) {
+      const arr = grouped.get(r.category) ?? [];
+      arr.push(`### ${r.title}\n${r.content}`);
+      grouped.set(r.category, arr);
+    }
+    const sections: string[] = [];
+    for (const [cat, items] of grouped) {
+      const label = KB_CATEGORY_LABELS[cat] ?? cat;
+      sections.push(`## ${label}\n\n${items.join("\n\n")}`);
+    }
+    const text = sections.join("\n\n");
+    kbCache = { text, loadedAt: now };
+    return text;
+  } catch {
+    return "";
   }
 }
 
@@ -202,6 +257,10 @@ export async function extractLeadFromChat(
     (n): n is string => !!n
   );
   const { anonymized, placeholderMap } = anonymize(input.chatText, knownNames);
+  const knowledge = await loadKnowledgeContext();
+  const knowledgeBlock = knowledge
+    ? `\n\n--- ידע מובנה על המוצר (השתמש בזה כדי לזהות נכון מה הלקוח שואל ומה רלוונטי לו) ---\n\n${knowledge}\n\n--- סוף ידע מובנה ---\n`
+    : "";
 
   let result: ExtractedLead | undefined;
   let error: string | undefined;
@@ -212,7 +271,7 @@ export async function extractLeadFromChat(
       messages: [
         {
           role: "system",
-          content: `אתה מנתח שיחות WhatsApp עבור Weber Tours — נופש כשר באלפים האוסטריים בסנט אנטון. הלקוחות הם יהודים חרדים מישראל, ארה"ב ואירופה.
+          content: `אתה מנתח שיחות WhatsApp עבור Weber Tours — נופש כשר באלפים האוסטריים בסנט אנטון. הלקוחות הם יהודים חרדים מישראל, ארה"ב ואירופה.${knowledgeBlock}
 
 תפקידך: לחלץ מידע מובנה משיחה בין "Me" (איש המכירות) לבין הלקוח ("[NAME]").
 
