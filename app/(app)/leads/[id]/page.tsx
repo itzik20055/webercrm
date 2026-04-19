@@ -27,7 +27,8 @@ import { fullDate, relativeTime, telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
 import { StatusPicker, PriorityPicker } from "@/components/status-picker";
 import { InterestTags } from "@/components/interest-tags";
-import { CompleteFollowupButton } from "@/components/complete-followup-button";
+import { ResolveFollowupButton } from "@/components/resolve-followup";
+import { CopyChip } from "@/components/copy-chip";
 
 export const dynamic = "force-dynamic";
 
@@ -111,8 +112,18 @@ export default async function LeadPage({
         </div>
 
         <div className="flex flex-wrap gap-1.5 text-xs">
-          <Chip icon={<Phone className="size-3.5" />}>{lead.phone}</Chip>
-          {lead.email && <Chip icon={<Mail className="size-3.5" />}>{lead.email}</Chip>}
+          <CopyChip
+            value={lead.phone}
+            label="מספר טלפון"
+            icon={<Phone className="size-3.5" />}
+          />
+          {lead.email && (
+            <CopyChip
+              value={lead.email}
+              label="אימייל"
+              icon={<Mail className="size-3.5" />}
+            />
+          )}
           <Chip icon={<Languages className="size-3.5" />}>
             {LANGUAGE_LABELS[lead.language]}
           </Chip>
@@ -170,7 +181,7 @@ export default async function LeadPage({
                         </div>
                       )}
                     </div>
-                    <CompleteFollowupButton
+                    <ResolveFollowupButton
                       followupId={f.id}
                       leadId={lead.id}
                       label="בוצע"

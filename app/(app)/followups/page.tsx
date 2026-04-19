@@ -4,7 +4,7 @@ import { db, followups, leads } from "@/db";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { StatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
-import { CompleteFollowupButton } from "@/components/complete-followup-button";
+import { ResolveFollowupButton } from "@/components/resolve-followup";
 import { fullDate, telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
 import { AUDIENCE_LABELS } from "@/db/schema";
@@ -167,7 +167,7 @@ function FollowupRow({ row, overdue }: { row: Row; overdue?: boolean }) {
           <MessageCircle className="size-[16px]" strokeWidth={2.2} />
           וואטסאפ
         </a>
-        <CompleteFollowupButton followupId={row.id} leadId={row.leadId} label="בוצע" />
+        <ResolveFollowupButton followupId={row.id} leadId={row.leadId} label="בוצע" />
       </div>
     </div>
   );

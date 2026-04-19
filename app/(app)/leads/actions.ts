@@ -474,3 +474,85 @@ export async function completeFollowup(followupId: string, leadId: string) {
   revalidatePath("/followups");
   revalidatePath("/");
 }
+
+const resolveSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("next"),
+    followupId: z.string().uuid(),
+    leadId: z.string().uuid(),
+    dueAt: z.string().min(1),
+    reason: z.string().max(500).optional(),
+  }),
+  z.object({
+    action: z.literal("booked"),
+    followupId: z.string().uuid(),
+    leadId: z.string().uuid(),
+    note: z.string().max(500).optional(),
+  }),
+  z.object({
+    action: z.literal("lost"),
+    followupId: z.string().uuid(),
+    leadId: z.string().uuid(),
+    reason: z.string().max(500).optional(),
+  }),
+]);
+
+export async function resolveFollowup(formData: FormData) {
+  const raw: Record<string, unknown> = {};
+  formData.forEach((v, k) => {
+    raw[k] = v;
+  });
+  const parsed = resolveSchema.parse(raw);
+
+  await db
+    .update(followups)
+    .set({ completedAt: new Date() })
+    .where(eq(followups.id, parsed.followupId));
+
+  if (parsed.action === "next") {
+    const due = new Date(parsed.dueAt);
+    if (isNaN(due.getTime())) throw new Error("Invalid date");
+    await db.insert(followups).values({
+      leadId: parsed.leadId,
+      dueAt: due,
+      reason: parsed.reason ?? null,
+    });
+    await db
+      .update(leads)
+      .set({
+        nextFollowupAt: due,
+        followupCompletedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(leads.id, parsed.leadId));
+  } else if (parsed.action === "booked") {
+    const update: Record<string, unknown> = {
+      status: "booked" as const,
+      nextFollowupAt: null,
+      followupCompletedAt: new Date(),
+      updatedAt: new Date(),
+    };
+    if (parsed.note) {
+      const [existing] = await db.select({ notes: leads.notes }).from(leads).where(eq(leads.id, parsed.leadId));
+      const ts = new Date().toLocaleDateString("he-IL");
+      const line = `[${ts}] נסגר: ${parsed.note}`;
+      update.notes = existing?.notes ? `${existing.notes}\n${line}` : line;
+    }
+    await db.update(leads).set(update).where(eq(leads.id, parsed.leadId));
+  } else if (parsed.action === "lost") {
+    await db
+      .update(leads)
+      .set({
+        status: "lost" as const,
+        lostReason: parsed.reason ?? null,
+        nextFollowupAt: null,
+        followupCompletedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(leads.id, parsed.leadId));
+  }
+
+  revalidatePath(`/leads/${parsed.leadId}`);
+  revalidatePath("/followups");
+  revalidatePath("/");
+}
