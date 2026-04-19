@@ -248,6 +248,9 @@ export async function scheduleFollowup(formData: FormData) {
   revalidatePath("/");
 }
 
+const emptyToNull = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === "" ? null : v), schema);
+
 const importSchema = z.object({
   name: z.string().min(1).max(120),
   phone: z.string().min(5).max(40),
@@ -263,12 +266,12 @@ const importSchema = z.object({
     "lost",
   ]),
   priority: z.enum(["hot", "warm", "cold"]),
-  numAdults: z.coerce.number().int().min(0).nullish(),
-  numChildren: z.coerce.number().int().min(0).nullish(),
+  numAdults: emptyToNull(z.coerce.number().int().min(0).nullish()),
+  numChildren: emptyToNull(z.coerce.number().int().min(0).nullish()),
   agesChildren: z.string().nullish(),
   datesInterest: z.string().nullish(),
   roomTypeInterest: z.string().nullish(),
-  budgetSignal: z.enum(["low", "mid", "high"]).nullish(),
+  budgetSignal: emptyToNull(z.enum(["low", "mid", "high"]).nullish()),
   interestTags: z.array(z.string()).default([]),
   whatSpokeToThem: z.string().nullish(),
   objections: z.string().nullish(),
@@ -351,12 +354,12 @@ const mergeImportSchema = z.object({
     .enum(["new", "contacted", "interested", "quoted", "closing", "booked", "lost"])
     .optional(),
   priority: z.enum(["hot", "warm", "cold"]).optional(),
-  numAdults: z.coerce.number().int().min(0).nullish(),
-  numChildren: z.coerce.number().int().min(0).nullish(),
+  numAdults: emptyToNull(z.coerce.number().int().min(0).nullish()),
+  numChildren: emptyToNull(z.coerce.number().int().min(0).nullish()),
   agesChildren: z.string().nullish(),
   datesInterest: z.string().nullish(),
   roomTypeInterest: z.string().nullish(),
-  budgetSignal: z.enum(["low", "mid", "high"]).nullish(),
+  budgetSignal: emptyToNull(z.enum(["low", "mid", "high"]).nullish()),
   interestTags: z.array(z.string()).default([]),
   whatSpokeToThem: z.string().nullish(),
   objections: z.string().nullish(),
