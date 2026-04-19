@@ -59,21 +59,21 @@ export default async function LeadPage({
 
   return (
     <div className="pb-8">
-      <header className="sticky top-0 z-20 bg-background/95 backdrop-blur border-b px-4 py-3 flex items-center gap-2">
+      <header className="sticky top-0 z-20 bg-background/85 backdrop-blur-xl border-b border-border/60 px-4 py-3 flex items-center gap-2">
         <Link
           href="/leads"
-          className="size-9 -mr-2 rounded-full flex items-center justify-center hover:bg-accent"
+          className="press size-10 -mr-2 rounded-full flex items-center justify-center hover:bg-accent"
           aria-label="חזרה"
         >
-          <ChevronRight className="size-5" />
+          <ChevronRight className="size-[18px]" />
         </Link>
-        <h1 className="text-lg font-bold flex-1 truncate">{lead.name}</h1>
+        <h1 className="text-base font-bold flex-1 truncate tracking-tight">{lead.name}</h1>
         <Link
           href={`/leads/${id}/edit`}
-          className="size-9 rounded-full flex items-center justify-center hover:bg-accent"
+          className="press size-10 rounded-full flex items-center justify-center hover:bg-accent"
           aria-label="עריכה"
         >
-          <Pencil className="size-4" />
+          <Pencil className="size-[16px]" />
         </Link>
       </header>
 
@@ -81,36 +81,36 @@ export default async function LeadPage({
         <div className="grid grid-cols-3 gap-2">
           <a
             href={telLink(lead.phone)}
-            className="flex flex-col items-center gap-1 py-3 rounded-lg bg-primary/10 text-primary active:scale-95 transition"
+            className="press flex flex-col items-center gap-1.5 py-3.5 rounded-2xl bg-primary-soft text-primary border border-primary/10"
           >
-            <Phone className="size-5" />
-            <span className="text-xs font-medium">חייג</span>
+            <Phone className="size-5" strokeWidth={2.2} />
+            <span className="text-xs font-semibold">חייג</span>
           </a>
           <a
             href={whatsappLink(lead.phone)}
             target="_blank"
             rel="noreferrer"
-            className="flex flex-col items-center gap-1 py-3 rounded-lg bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 active:scale-95 transition"
+            className="press flex flex-col items-center gap-1.5 py-3.5 rounded-2xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border border-emerald-500/15"
           >
-            <MessageCircle className="size-5" />
-            <span className="text-xs font-medium">וואטסאפ</span>
+            <MessageCircle className="size-5" strokeWidth={2.2} />
+            <span className="text-xs font-semibold">וואטסאפ</span>
           </a>
           <a
             href={lead.email ? `mailto:${lead.email}` : "#"}
             aria-disabled={!lead.email}
             className={
-              "flex flex-col items-center gap-1 py-3 rounded-lg active:scale-95 transition " +
+              "flex flex-col items-center gap-1.5 py-3.5 rounded-2xl border " +
               (lead.email
-                ? "bg-blue-500/15 text-blue-700 dark:text-blue-300"
-                : "bg-muted text-muted-foreground pointer-events-none")
+                ? "press bg-blue-500/12 text-blue-700 dark:text-blue-300 border-blue-500/15"
+                : "bg-muted/60 text-muted-foreground border-transparent pointer-events-none")
             }
           >
-            <Mail className="size-5" />
-            <span className="text-xs font-medium">מייל</span>
+            <Mail className="size-5" strokeWidth={2.2} />
+            <span className="text-xs font-semibold">מייל</span>
           </a>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-xs">
+        <div className="flex flex-wrap gap-1.5 text-xs">
           <Chip icon={<Phone className="size-3.5" />}>{lead.phone}</Chip>
           {lead.email && <Chip icon={<Mail className="size-3.5" />}>{lead.email}</Chip>}
           <Chip icon={<Languages className="size-3.5" />}>
@@ -118,7 +118,7 @@ export default async function LeadPage({
           </Chip>
           <Chip icon={<Globe className="size-3.5" />}>
             {AUDIENCE_LABELS[lead.audience]} · {localNow}
-            {!goodTime && <span className="text-amber-600"> · לא זמן טוב</span>}
+            {!goodTime && <span className="text-amber-600 font-semibold"> · לא זמן טוב</span>}
           </Chip>
           <Chip>הגיע דרך: {CHANNEL_LABELS[lead.channelFirst]}</Chip>
           {lead.source && <Chip>מקור: {lead.source}</Chip>}
@@ -309,20 +309,20 @@ export default async function LeadPage({
         </Card>
       </div>
 
-      <div className="fixed bottom-20 inset-x-0 px-4 z-20 pointer-events-none">
+      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+72px)] inset-x-0 px-4 z-20 pointer-events-none">
         <div className="max-w-lg mx-auto flex gap-2 pointer-events-auto">
           <Link
             href={`/leads/${id}/log`}
-            className="flex-1 h-12 rounded-full bg-primary text-primary-foreground font-medium flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition"
+            className="press flex-1 h-12 rounded-full bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 shadow-pop"
           >
-            <MessageSquarePlus className="size-5" />
+            <MessageSquarePlus className="size-5" strokeWidth={2.2} />
             תיעוד שיחה
           </Link>
           <Link
             href={`/leads/${id}/followup`}
-            className="h-12 px-5 rounded-full bg-card border font-medium flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition"
+            className="press h-12 px-5 rounded-full bg-card border border-border font-semibold flex items-center justify-center gap-2 shadow-pop"
           >
-            <BellRing className="size-5" />
+            <BellRing className="size-5" strokeWidth={2.2} />
             פולואפ
           </Link>
         </div>
@@ -343,9 +343,9 @@ function Card({
   children: React.ReactNode;
 }) {
   return (
-    <section className="bg-card border rounded-xl p-3.5 space-y-3">
+    <section className="bg-card border border-border/70 rounded-2xl p-4 space-y-3 shadow-soft">
       <header className="flex items-center justify-between">
-        <h2 className="font-semibold text-sm flex items-center gap-1.5">
+        <h2 className="font-bold text-[13px] tracking-tight text-muted-foreground flex items-center gap-1.5">
           {icon}
           {title}
         </h2>
@@ -364,7 +364,7 @@ function Chip({
   icon?: React.ReactNode;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground">
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-secondary text-secondary-foreground font-medium">
       {icon}
       {children}
     </span>

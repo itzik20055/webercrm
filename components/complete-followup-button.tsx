@@ -28,7 +28,7 @@ export function CompleteFollowupButton({
           }
         })
       }
-      className="inline-flex items-center gap-1.5 px-3 h-8 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-sm font-medium active:scale-95 transition disabled:opacity-50"
+      className="press inline-flex items-center gap-1.5 px-3.5 h-10 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-sm font-semibold disabled:opacity-50"
     >
       <Check className="size-4" />
       {label}

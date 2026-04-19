@@ -1,8 +1,17 @@
 import Link from "next/link";
 import { db, leads, followups } from "@/db";
-import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
-import { Plus, BellRing, Flame, Sparkles, ChevronLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import {
+  Plus,
+  BellRing,
+  Flame,
+  Sparkles,
+  ChevronLeft,
+  Phone,
+  MessageCircle,
+  TrendingUp,
+  PartyPopper,
+} from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { smartDate, telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
@@ -59,6 +68,14 @@ async function getDashboard() {
   return { todaysFollowups, hot, recent, counts: counts[0] };
 }
 
+const greeting = () => {
+  const h = new Date().getHours();
+  if (h < 12) return "בוקר טוב";
+  if (h < 18) return "צהריים טובים";
+  if (h < 22) return "ערב טוב";
+  return "לילה טוב";
+};
+
 export default async function HomePage() {
   const { todaysFollowups, hot, recent, counts } = await getDashboard();
   const overdueCount = todaysFollowups.filter(
@@ -66,37 +83,56 @@ export default async function HomePage() {
   ).length;
 
   return (
-    <div className="px-4 pt-6 pb-4 space-y-5">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">שלום איציק 👋</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {counts.active} לידים פעילים · {counts.booked} סגורים העונה
+    <div className="px-4 pt-5 pb-6 space-y-5">
+      <header className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-muted-foreground tracking-tight">
+            {greeting()}
           </p>
+          <h1 className="text-[26px] font-bold tracking-tight leading-tight">
+            איציק
+          </h1>
         </div>
-        <Button asChild size="lg" className="rounded-full shadow-md">
-          <Link href="/leads/new">
-            <Plus className="size-5" />
-            ליד חדש
-          </Link>
-        </Button>
+        <Link
+          href="/leads/new"
+          className="press inline-flex items-center gap-1.5 h-11 px-4 rounded-full bg-primary text-primary-foreground text-sm font-semibold shadow-card"
+        >
+          <Plus className="size-[18px]" strokeWidth={2.5} />
+          ליד חדש
+        </Link>
       </header>
+
+      <div className="relative overflow-hidden rounded-[20px] bg-gradient-to-br from-primary via-primary to-[oklch(0.30_0.14_270)] text-primary-foreground p-5 shadow-card">
+        <div className="absolute -top-12 -left-12 size-40 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute -bottom-16 -right-8 size-44 rounded-full bg-[var(--gold)]/30 blur-3xl" />
+        <div className="relative">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
+            <TrendingUp className="size-3.5" />
+            סטטיסטיקה
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            <Stat label="פעילים" value={counts.active} />
+            <Stat label="סגורים" value={counts.booked} accent />
+            <Stat label="באיחור" value={counts.overdue} warn={counts.overdue > 0} />
+          </div>
+        </div>
+      </div>
 
       <Section
         title="פולואפים להיום"
-        icon={<BellRing className="size-4" />}
+        icon={<BellRing className="size-[18px] text-primary" />}
         href="/followups"
         badge={
           todaysFollowups.length > 0
             ? {
-                text: `${todaysFollowups.length}${overdueCount > 0 ? ` (${overdueCount} באיחור)` : ""}`,
+                text: `${todaysFollowups.length}${overdueCount > 0 ? ` · ${overdueCount} באיחור` : ""}`,
                 tone: overdueCount > 0 ? "destructive" : "default",
               }
             : undefined
         }
       >
         {todaysFollowups.length === 0 ? (
-          <EmptyRow text="אין פולואפים להיום 🎉" />
+          <EmptyRow icon={<PartyPopper className="size-4" />} text="אין פולואפים להיום" />
         ) : (
           todaysFollowups.slice(0, 5).map((f) => {
             const overdue = new Date(f.dueAt) < new Date();
@@ -104,14 +140,16 @@ export default async function HomePage() {
             return (
               <div
                 key={f.id}
-                className="flex items-start gap-2 p-3 rounded-lg bg-card border hover:bg-accent transition"
+                className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-card border border-border/70 shadow-soft"
               >
                 <Link
                   href={`/leads/${f.leadId}`}
-                  className="min-w-0 flex-1 active:scale-[0.99]"
+                  className="min-w-0 flex-1 press"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="font-medium truncate">{f.leadName}</span>
+                    <span className="font-semibold truncate tracking-tight">
+                      {f.leadName}
+                    </span>
                     <StatusBadge status={f.leadStatus} />
                   </div>
                   {f.reason && (
@@ -119,12 +157,12 @@ export default async function HomePage() {
                       {f.reason}
                     </p>
                   )}
-                  <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground">
-                    <span className={overdue ? "text-destructive font-medium" : ""}>
+                  <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
+                    <span className={overdue ? "text-destructive font-semibold" : "font-medium"}>
                       {smartDate(f.dueAt)}
                     </span>
-                    <span>·</span>
-                    <span className={goodTime ? "" : "text-amber-600"}>
+                    <span className="opacity-50">·</span>
+                    <span className={goodTime ? "" : "text-amber-600 font-medium"}>
                       {localTimeLabel(f.leadAudience)} {AUDIENCE_LABELS[f.leadAudience].split(" ")[1]}
                     </span>
                   </div>
@@ -132,19 +170,19 @@ export default async function HomePage() {
                 <div className="flex gap-1.5 shrink-0">
                   <a
                     href={telLink(f.leadPhone)}
-                    className="size-9 rounded-full bg-primary/10 text-primary flex items-center justify-center"
+                    className="press size-10 rounded-full bg-primary-soft text-primary flex items-center justify-center"
                     aria-label="חייג"
                   >
-                    📞
+                    <Phone className="size-[18px]" strokeWidth={2.2} />
                   </a>
                   <a
                     href={whatsappLink(f.leadPhone)}
                     target="_blank"
                     rel="noreferrer"
-                    className="size-9 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center"
+                    className="press size-10 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"
                     aria-label="וואטסאפ"
                   >
-                    💬
+                    <MessageCircle className="size-[18px]" strokeWidth={2.2} />
                   </a>
                 </div>
               </div>
@@ -155,7 +193,7 @@ export default async function HomePage() {
 
       <Section
         title="לידים חמים"
-        icon={<Flame className="size-4 text-red-500" />}
+        icon={<Flame className="size-[18px] text-red-500" />}
         href="/leads?priority=hot"
       >
         {hot.length === 0 ? (
@@ -169,15 +207,43 @@ export default async function HomePage() {
 
       <Section
         title="חדשים השבוע"
-        icon={<Sparkles className="size-4 text-blue-500" />}
+        icon={<Sparkles className="size-[18px] text-blue-500" />}
         href="/leads"
       >
         {recent.length === 0 ? (
-          <EmptyRow text="עדיין לא נכנסו לידים — לך תוסיף את הראשון!" />
+          <EmptyRow text="עדיין לא נכנסו לידים — הוסף את הראשון" />
         ) : (
           recent.slice(0, 4).map((l) => <LeadRow key={l.id} lead={l} />)
         )}
       </Section>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  accent,
+  warn,
+}: {
+  label: string;
+  value: number;
+  accent?: boolean;
+  warn?: boolean;
+}) {
+  return (
+    <div>
+      <div
+        className={
+          "text-[28px] font-bold leading-none tracking-tight tabular-nums " +
+          (accent ? "text-[var(--gold)]" : warn ? "text-amber-200" : "text-white")
+        }
+      >
+        {value}
+      </div>
+      <div className="text-[11px] font-medium text-white/70 mt-1 tracking-tight">
+        {label}
+      </div>
     </div>
   );
 }
@@ -200,13 +266,13 @@ function Section({
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
           {icon}
-          <h2 className="font-semibold">{title}</h2>
+          <h2 className="font-bold tracking-tight">{title}</h2>
           {badge && (
             <span
               className={
-                "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium " +
+                "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold " +
                 (badge.tone === "destructive"
-                  ? "bg-destructive/15 text-destructive"
+                  ? "bg-destructive/12 text-destructive"
                   : "bg-secondary text-secondary-foreground")
               }
             >
@@ -217,7 +283,7 @@ function Section({
         {href && (
           <Link
             href={href}
-            className="text-xs text-muted-foreground flex items-center"
+            className="press text-xs font-semibold text-muted-foreground flex items-center"
           >
             הכל
             <ChevronLeft className="size-3.5" />
@@ -229,9 +295,10 @@ function Section({
   );
 }
 
-function EmptyRow({ text }: { text: string }) {
+function EmptyRow({ text, icon }: { text: string; icon?: React.ReactNode }) {
   return (
-    <div className="text-sm text-muted-foreground py-4 px-3 text-center bg-card border border-dashed rounded-lg">
+    <div className="text-sm text-muted-foreground py-5 px-3 text-center bg-card/60 border border-dashed border-border/80 rounded-2xl flex items-center justify-center gap-2">
+      {icon}
       {text}
     </div>
   );
@@ -241,14 +308,14 @@ function LeadRow({ lead }: { lead: typeof leads.$inferSelect }) {
   return (
     <Link
       href={`/leads/${lead.id}`}
-      className="flex items-center justify-between p-3 rounded-lg bg-card border hover:bg-accent transition active:scale-[0.99]"
+      className="press flex items-center justify-between p-3.5 rounded-2xl bg-card border border-border/70 shadow-soft"
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="font-medium truncate">{lead.name}</span>
+          <span className="font-semibold truncate tracking-tight">{lead.name}</span>
           <StatusBadge status={lead.status} />
         </div>
-        <div className="text-xs text-muted-foreground mt-1">
+        <div className="text-xs text-muted-foreground mt-1 tabular-nums">
           {smartDate(lead.updatedAt)} · {lead.phone}
         </div>
       </div>
