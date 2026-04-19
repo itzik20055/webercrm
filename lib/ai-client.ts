@@ -1,7 +1,14 @@
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { db, aiAuditLog, productKb } from "@/db";
+import { and, desc, eq } from "drizzle-orm";
+import {
+  db,
+  aiAuditLog,
+  productKb,
+  voiceExamples,
+  type Lead,
+  type Interaction,
+} from "@/db";
 import { anonymize, deanonymize } from "./anonymize";
 
 /** Models we use through Vercel AI Gateway. */
@@ -354,4 +361,224 @@ export async function extractLeadFromChat(
   }
 
   return { lead: result!, durationMs: Date.now() - start };
+}
+
+export type DraftScenario =
+  | "first_reply"
+  | "send_price"
+  | "price_objection"
+  | "silent_followup"
+  | "date_confirmation"
+  | "closing_request"
+  | "general";
+
+const SCENARIO_GUIDANCE: Record<DraftScenario, string> = {
+  first_reply:
+    "תשובה ראשונה לפנייה — חמה, מקצועית, פותחת דיאלוג. בלי לחץ. שאל שאלה אחת מנחה.",
+  send_price:
+    "שליחת מחיר — בלי תירוצים. מחיר ברור + מה כלול בקצרה + הזמנה רכה לסגור או לשאול.",
+  price_objection:
+    "התנגדות מחיר — אל תוריד מיד. הצדק ערך, השווה למה שכלול, תן אופציה זולה יותר אם יש. בלי להתנצל.",
+  silent_followup:
+    "פולואפ ללקוח שותק — קצר, חם, לא מאשים. תזכיר את ההקשר ופתח דלת קלה לחזור.",
+  date_confirmation:
+    "אישור תאריכים — מדויק, רשמי, חוזר על הפרטים. שאל מה הצעד הבא (תשלום/אישור).",
+  closing_request:
+    "בקשת סגירה — ברור, ישיר, ידידותי. הציע צעד קונקרטי (תשלום/חוזה).",
+  general: "תשובה מותאמת להקשר. תקרא את השיחה והבן מה צריך עכשיו.",
+};
+
+const DraftSchema = z.object({
+  draft: z
+    .string()
+    .describe("טקסט התשובה המוצעת בעברית/אנגלית/אידיש לפי שפת הליד"),
+  reasoning: z
+    .string()
+    .describe("משפט אחד קצר על למה בחרת בניסוח הזה"),
+});
+
+export interface DraftReplyInput {
+  lead: Lead;
+  recentInteractions: Interaction[];
+  scenario: DraftScenario;
+  freeNote?: string;
+}
+
+export interface DraftReplyOutput {
+  draft: string;
+  reasoning: string;
+  exampleCount: number;
+  contextSnapshot: {
+    scenario: DraftScenario;
+    audience: Lead["audience"];
+    language: Lead["language"];
+    exampleIds: string[];
+    interactionIds: string[];
+    freeNote?: string;
+  };
+  durationMs: number;
+}
+
+/**
+ * Generates a customer-facing draft reply, learned from prior accepted edits.
+ * Pulls top voice examples matching audience+scenario+language to teach the
+ * model the user's tone — gracefully degrades to KB+rules when 0 examples.
+ */
+export async function draftReply(
+  input: DraftReplyInput
+): Promise<DraftReplyOutput> {
+  ensureGatewayKey();
+  const start = Date.now();
+  const { lead, recentInteractions, scenario, freeNote } = input;
+
+  const examples = await db
+    .select({
+      id: voiceExamples.id,
+      finalText: voiceExamples.finalText,
+      aiDraft: voiceExamples.aiDraft,
+    })
+    .from(voiceExamples)
+    .where(
+      and(
+        eq(voiceExamples.scenario, scenario),
+        eq(voiceExamples.audience, lead.audience),
+        eq(voiceExamples.language, lead.language)
+      )
+    )
+    .orderBy(desc(voiceExamples.createdAt))
+    .limit(5);
+
+  const knowledge = await loadKnowledgeContext();
+  const knowledgeBlock = knowledge
+    ? `\n\n--- ידע על המוצר (השתמש בעובדות מכאן בלבד) ---\n\n${knowledge}\n\n--- סוף ---\n`
+    : "";
+
+  const examplesBlock =
+    examples.length > 0
+      ? `\n\n--- דוגמאות מאושרות מהעבר (זה הסגנון, הטון והאורך הרצוי — חקה אותם) ---\n\n${examples
+          .map(
+            (e, i) =>
+              `### דוגמה ${i + 1}\n${e.finalText}`
+          )
+          .join("\n\n")}\n\n--- סוף דוגמאות ---\n`
+      : "\n\n(אין עדיין דוגמאות מאושרות לתרחיש הזה — נסח לפי הכללים והידע על המוצר.)\n";
+
+  const interactionsBlock =
+    recentInteractions.length > 0
+      ? recentInteractions
+          .slice(0, 10)
+          .reverse()
+          .map(
+            (i) =>
+              `[${i.type}] ${new Date(i.occurredAt).toISOString()}: ${i.content.slice(0, 800)}`
+          )
+          .join("\n\n")
+      : "(אין אינטראקציות קודמות מתועדות.)";
+
+  const leadProfile = [
+    `שם: ${lead.name}`,
+    `שפה: ${lead.language}`,
+    `קהל: ${lead.audience}`,
+    `סטטוס: ${lead.status}`,
+    lead.numAdults != null ? `מבוגרים: ${lead.numAdults}` : null,
+    lead.numChildren != null ? `ילדים: ${lead.numChildren}` : null,
+    lead.agesChildren ? `גילי ילדים: ${lead.agesChildren}` : null,
+    lead.datesInterest ? `תאריכים: ${lead.datesInterest}` : null,
+    lead.roomTypeInterest ? `חדר: ${lead.roomTypeInterest}` : null,
+    lead.budgetSignal ? `תקציב: ${lead.budgetSignal}` : null,
+    lead.interestTags?.length ? `התעניין ב: ${lead.interestTags.join(", ")}` : null,
+    lead.whatSpokeToThem ? `מה תפס אותו: ${lead.whatSpokeToThem}` : null,
+    lead.objections ? `התנגדויות: ${lead.objections}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const { anonymized: anonInteractions, placeholderMap: pm1 } = anonymize(
+    interactionsBlock,
+    [lead.name].filter((n): n is string => !!n)
+  );
+  const { anonymized: anonProfile, placeholderMap: pm2 } = anonymize(
+    leadProfile,
+    [lead.name].filter((n): n is string => !!n)
+  );
+  const placeholderMap = { ...pm1, ...pm2 };
+
+  const langInstruction =
+    lead.language === "he"
+      ? "כתוב בעברית."
+      : lead.language === "en"
+        ? "Write in English."
+        : "Write in Yiddish (with Hebrew letters).";
+
+  const systemPrompt = `אתה עוזר כתיבה לאיש מכירות של Weber Tours — נופש כשר באלפים האוסטריים בסנט אנטון. אתה מנסח טיוטות תשובה ללקוחות שהוא יכול לשלוח אחרי בדיקה ועריכה קלה.
+
+כללים נוקשים:
+1. **חקה את הסגנון של הדוגמאות** — אם יש דוגמאות מאושרות, הטון, האורך והבחירת המילים שלהן הם הסטנדרט. אל תהיה רשמי יותר ואל תהיה ארוך יותר מהן.
+2. **בלי אימוג׳ים** ו**בלי קלישאות מכירה**. הטון בוגר ושקט.
+3. **אל תמכור** את מה שכבר משך אותם — הם יודעים שזה כשר, שיש מנייני תפילה, שזה באלפים. תתמקד במה שעוד לא ענו עליו או במה שצריך כדי להתקדם.
+4. אל תכתוב את שם הלקוח. השאר רווח להוספה ידנית, או פשוט פתח בלי שם.
+5. אל תמציא עובדות שלא בידע. אם חסר מידע (מחיר, מועד, סוג חדר זמין) — אל תנחש; כתוב "אבדוק ואחזור" או השאר מקום ל[X].
+6. ${langInstruction}
+${knowledgeBlock}${examplesBlock}`;
+
+  const userPrompt = `### תרחיש: ${scenario}
+${SCENARIO_GUIDANCE[scenario]}
+
+### פרופיל הליד (מאונונם):
+${anonProfile}
+
+### היסטוריית האינטראקציות (אחרונות, מאונונם):
+${anonInteractions}
+${freeNote ? `\n### הוראה ספציפית מהמשתמש לטיוטה הזו:\n${freeNote}\n` : ""}
+נסח טיוטה אחת. החזר אותה בשדה draft. בשדה reasoning הסבר במשפט אחד קצר.`;
+
+  let result: { draft: string; reasoning: string } | undefined;
+  let error: string | undefined;
+  try {
+    const { object } = await generateObject({
+      model: MODELS.extract,
+      schema: DraftSchema,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+    result = object;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    throw e;
+  } finally {
+    const durationMs = Date.now() - start;
+    await db
+      .insert(aiAuditLog)
+      .values({
+        operation: `draft_reply:${scenario}`,
+        model: MODELS.extract,
+        inputAnonymized: `${anonProfile}\n---\n${anonInteractions}`,
+        output: result ? JSON.stringify(result) : null,
+        placeholderMap,
+        leadId: lead.id,
+        durationMs,
+        error: error ?? null,
+      })
+      .catch(() => {});
+  }
+
+  const draft = result ? deanonymize(result.draft, placeholderMap) : "";
+  const reasoning = result ? deanonymize(result.reasoning, placeholderMap) : "";
+
+  return {
+    draft,
+    reasoning,
+    exampleCount: examples.length,
+    contextSnapshot: {
+      scenario,
+      audience: lead.audience,
+      language: lead.language,
+      exampleIds: examples.map((e) => e.id),
+      interactionIds: recentInteractions.slice(0, 10).map((i) => i.id),
+      freeNote,
+    },
+    durationMs: Date.now() - start,
+  };
 }

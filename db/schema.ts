@@ -59,6 +59,16 @@ export const kbCategoryEnum = pgEnum("kb_category", [
   "faq",
 ]);
 
+export const draftScenarioEnum = pgEnum("draft_scenario", [
+  "first_reply",
+  "send_price",
+  "price_objection",
+  "silent_followup",
+  "date_confirmation",
+  "closing_request",
+  "general",
+]);
+
 export const leads = pgTable(
   "leads",
   {
@@ -151,6 +161,25 @@ export const productKb = pgTable("product_kb", {
   updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
 
+export const voiceExamples = pgTable(
+  "voice_examples",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    leadId: uuid().references(() => leads.id, { onDelete: "set null" }),
+    scenario: draftScenarioEnum().notNull(),
+    language: languageEnum().notNull(),
+    audience: audienceEnum().notNull(),
+    aiDraft: text().notNull(),
+    finalText: text().notNull(),
+    contextSnapshot: jsonb(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("voice_examples_match_idx").on(t.audience, t.scenario, t.language),
+    index("voice_examples_created_idx").on(t.createdAt),
+  ]
+);
+
 export const responseTemplates = pgTable("response_templates", {
   id: uuid().primaryKey().defaultRandom(),
   language: languageEnum().notNull().default("he"),
@@ -219,6 +248,8 @@ export type Followup = typeof followups.$inferSelect;
 export type NewFollowup = typeof followups.$inferInsert;
 export type ProductKb = typeof productKb.$inferSelect;
 export type ResponseTemplate = typeof responseTemplates.$inferSelect;
+export type VoiceExample = typeof voiceExamples.$inferSelect;
+export type NewVoiceExample = typeof voiceExamples.$inferInsert;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
 
@@ -278,4 +309,14 @@ export const INTERACTION_TYPE_LABELS: Record<Interaction["type"], string> = {
   email: "מייל",
   sms: "SMS",
   note: "הערה",
+};
+
+export const DRAFT_SCENARIO_LABELS: Record<VoiceExample["scenario"], string> = {
+  first_reply: "תשובה ראשונה",
+  send_price: "שליחת מחיר",
+  price_objection: "התנגדות מחיר",
+  silent_followup: "פולואפ לליד שותק",
+  date_confirmation: "אישור תאריכים",
+  closing_request: "בקשת סגירה",
+  general: "כללי",
 };

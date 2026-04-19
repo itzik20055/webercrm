@@ -15,6 +15,13 @@
       "when": 1776605735458,
       "tag": "0001_productive_elektra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776631158799,
+      "tag": "0002_fearless_centennial",
+      "breakpoints": true
     }
   ]
 }
