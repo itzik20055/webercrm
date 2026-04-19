@@ -4,7 +4,7 @@
   "description": "מערכת לידים אישית לוובר טורס",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#fafbfd",
   "theme_color": "#1e3a8a",
   "orientation": "portrait",
   "lang": "he",

@@ -102,9 +102,10 @@ export default async function HomePage() {
         </Link>
       </header>
 
-      <div className="relative overflow-hidden rounded-[20px] bg-gradient-to-br from-primary via-primary to-[oklch(0.30_0.14_270)] text-primary-foreground p-5 shadow-card">
-        <div className="absolute -top-12 -left-12 size-40 rounded-full bg-white/10 blur-2xl" />
-        <div className="absolute -bottom-16 -right-8 size-44 rounded-full bg-[var(--gold)]/30 blur-3xl" />
+      <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#1e3a8a] via-[#152a6b] to-[#0c1e6f] text-white p-5 shadow-card">
+        <div className="absolute -top-16 -left-10 size-44 rounded-full bg-white/8 blur-2xl" />
+        <div className="absolute -bottom-20 -right-10 size-52 rounded-full bg-[#f4d77c]/25 blur-3xl" />
+        <div className="absolute bottom-3 right-4 left-4 h-px bg-gradient-to-r from-transparent via-[#f4d77c]/40 to-transparent" />
         <div className="relative">
           <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
             <TrendingUp className="size-3.5" />
@@ -236,7 +237,7 @@ function Stat({
       <div
         className={
           "text-[28px] font-bold leading-none tracking-tight tabular-nums " +
-          (accent ? "text-[var(--gold)]" : warn ? "text-amber-200" : "text-white")
+          (accent ? "text-[#f4d77c]" : warn ? "text-amber-200" : "text-white")
         }
       >
         {value}
