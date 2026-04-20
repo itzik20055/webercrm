@@ -7,6 +7,7 @@ import { db, leads, followups, interactions } from "@/db";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { extractLeadFromChat, type ExtractedLead } from "@/lib/ai-client";
 import { getSetting } from "@/lib/settings";
+import { extractPhones } from "@/lib/phone";
 
 const createSchema = z.object({
   name: z.string().min(1, "שם חובה").max(120),
@@ -214,6 +215,64 @@ export async function logInteraction(formData: FormData) {
 
   revalidatePath(`/leads/${parsed.leadId}`);
   revalidatePath("/");
+}
+
+export type LeadMatch = {
+  id: string;
+  name: string;
+  phone: string;
+  status: "new" | "contacted" | "interested" | "quoted" | "closing" | "booked" | "lost";
+  updatedAt: Date;
+};
+
+export type FindLeadsResult = {
+  phones: string[];
+  matches: LeadMatch[];
+  recent: LeadMatch[];
+};
+
+export async function findLeadsForCapture(text: string): Promise<FindLeadsResult> {
+  const trimmed = (text ?? "").slice(0, 8000);
+  const phones = extractPhones(trimmed);
+
+  let matches: LeadMatch[] = [];
+  if (phones.length > 0) {
+    const conds = phones
+      .map((p) => p.replace(/\D/g, "").slice(-9))
+      .filter((tail) => tail.length >= 7)
+      .map(
+        (tail) =>
+          sql`right(regexp_replace(${leads.phone}, '\\D', '', 'g'), 9) = ${tail}`
+      );
+    if (conds.length > 0) {
+      matches = await db
+        .select({
+          id: leads.id,
+          name: leads.name,
+          phone: leads.phone,
+          status: leads.status,
+          updatedAt: leads.updatedAt,
+        })
+        .from(leads)
+        .where(conds.length === 1 ? conds[0] : sql.join(conds, sql` or `))
+        .orderBy(desc(leads.updatedAt))
+        .limit(5);
+    }
+  }
+
+  const recent = await db
+    .select({
+      id: leads.id,
+      name: leads.name,
+      phone: leads.phone,
+      status: leads.status,
+      updatedAt: leads.updatedAt,
+    })
+    .from(leads)
+    .orderBy(desc(leads.updatedAt))
+    .limit(8);
+
+  return { phones, matches, recent };
 }
 
 const captureSchema = z.object({

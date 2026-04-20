@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   MessageSquarePlus,
@@ -102,7 +103,24 @@ function followupLabel(iso: string): string {
   return `${date} (בעוד ${days} ימים)`;
 }
 
+function decodeFromUrl(s: string): string {
+  try {
+    const bin = atob(decodeURIComponent(s));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new TextDecoder().decode(bytes);
+  } catch {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  }
+}
+
 export function CaptureCard({ leadId }: { leadId: string }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [content, setContent] = useState("");
   const [type, setType] = useState<IType>("whatsapp");
   const [direction, setDirection] = useState<IDir>("in");
@@ -114,6 +132,7 @@ export function CaptureCard({ leadId }: { leadId: string }) {
 
   const [suggestions, setSuggestions] = useState<CaptureSuggestions | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
+  const autoRanRef = useRef(false);
 
   function reset() {
     setContent("");
@@ -241,6 +260,51 @@ export function CaptureCard({ leadId }: { leadId: string }) {
       }
     });
   }
+
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    const raw = searchParams.get("capture");
+    if (!raw) return;
+    autoRanRef.current = true;
+    const decoded = decodeFromUrl(raw);
+    if (!decoded) return;
+    setContent(decoded);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("capture");
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}#capture` : `#capture`, { scroll: false });
+    setTimeout(() => {
+      const target = document.getElementById("capture");
+      target?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+    setBusy("analyze");
+    setAnalyzing(true);
+    captureAndAnalyze({ leadId, type: "whatsapp", direction: "in", content: decoded })
+      .then((res) => {
+        if (!res.ok) {
+          toast.error(res.error || "ניתוח נכשל");
+          return;
+        }
+        toast.success("נשמר ונותח");
+        const empty =
+          !res.suggestions ||
+          (Object.keys(res.suggestions).length === 1 && res.suggestions.summary);
+        if (empty) {
+          setContent("");
+        } else {
+          setSuggestions(res.suggestions);
+          setSelection(defaultSelection(res.suggestions));
+          setContent("");
+        }
+      })
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : "ניתוח נכשל");
+      })
+      .finally(() => {
+        setBusy(null);
+        setAnalyzing(false);
+      });
+  }, [searchParams, leadId, router]);
 
   const hasAnyChange =
     selection &&

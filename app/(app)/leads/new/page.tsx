@@ -7,7 +7,12 @@ import {
   LANGUAGE_LABELS,
 } from "@/db/schema";
 
-export default function NewLeadPage() {
+export default async function NewLeadPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ name?: string; phone?: string; notes?: string }>;
+}) {
+  const sp = await searchParams;
   return (
     <div className="px-4 pt-4 pb-8">
       <header className="flex items-center gap-2 mb-5">
@@ -27,6 +32,7 @@ export default function NewLeadPage() {
             name="name"
             required
             autoFocus
+            defaultValue={sp.name ?? ""}
             placeholder="שם הלקוח"
             className="form-input"
           />
@@ -38,6 +44,7 @@ export default function NewLeadPage() {
             type="tel"
             required
             inputMode="tel"
+            defaultValue={sp.phone ?? ""}
             placeholder="050-1234567 או +1..."
             className="form-input"
           />
@@ -89,7 +96,8 @@ export default function NewLeadPage() {
         <Field label="הערה ראשונית">
           <textarea
             name="notes"
-            rows={3}
+            rows={4}
+            defaultValue={sp.notes ?? ""}
             placeholder="מה רצה? מה שאל?"
             className="form-input resize-none"
           />
