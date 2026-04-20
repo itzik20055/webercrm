@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { BellRing, BellOff, Send, Activity } from "lucide-react";
+import { BellRing, BellOff, Send, Activity, Sunrise } from "lucide-react";
 
 function urlBase64ToUint8Array(base64String: string) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -123,6 +123,24 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string | undefi
     }
   }
 
+  async function testBriefing() {
+    try {
+      const r = await fetch("/api/push/test-briefing", { method: "POST" });
+      const json = await r.json();
+      if (!r.ok || !json.ok) {
+        toast.error(json.error || "הבדיקה נכשלה");
+        return;
+      }
+      if (json.sent > 0) {
+        toast.success(`${json.title} — ${json.body}`, { duration: 6000 });
+      } else {
+        toast.error("אין מכשירים מנויים");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   if (subscribed) {
     return (
       <div className="space-y-2">
@@ -143,6 +161,15 @@ export function PushToggle({ vapidPublicKey }: { vapidPublicKey: string | undefi
         >
           <Activity className="size-4" />
           בדוק זרימת פולואפ מלאה
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => start(testBriefing)}
+          className="press w-full h-11 rounded-xl bg-orange-500/15 text-orange-700 dark:text-orange-300 border border-orange-500/20 flex items-center justify-center gap-2 text-sm font-semibold"
+        >
+          <Sunrise className="size-4" />
+          שלח בריפינג בוקר עכשיו
         </button>
         <button
           type="button"
