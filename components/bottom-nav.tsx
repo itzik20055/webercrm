@@ -36,7 +36,9 @@ export function BottomNav({ inboxCount = 0 }: { inboxCount?: number }) {
             <li key={href}>
               <Link
                 href={href}
-                className="flex flex-col items-center justify-center gap-0.5 py-1.5 press"
+                aria-current={active ? "page" : undefined}
+                aria-label={showBadge ? `${label} · ${inboxCount} ממתינים` : label}
+                className="flex flex-col items-center justify-center gap-0.5 py-1.5 press rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <span
                   className={cn(

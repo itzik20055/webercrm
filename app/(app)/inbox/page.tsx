@@ -105,19 +105,19 @@ function ReviewCard({
         <div className="flex gap-1.5 shrink-0">
           <a
             href={telLink(lead.phone)}
-            className="press size-9 rounded-full bg-primary-soft text-primary flex items-center justify-center"
-            aria-label="חייג"
+            className="press size-11 rounded-full bg-primary-soft text-primary flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+            aria-label={`חייג ל${lead.name}`}
           >
-            <Phone className="size-[16px]" strokeWidth={2.2} />
+            <Phone className="size-[18px]" strokeWidth={2.2} />
           </a>
           <a
             href={whatsappLink(lead.phone)}
             target="_blank"
             rel="noreferrer"
-            className="press size-9 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"
-            aria-label="וואטסאפ"
+            className="press size-11 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+            aria-label={`וואטסאפ ל${lead.name}`}
           >
-            <MessageCircle className="size-[16px]" strokeWidth={2.2} />
+            <MessageCircle className="size-[18px]" strokeWidth={2.2} />
           </a>
         </div>
       </header>
@@ -263,7 +263,7 @@ function ReviewCard({
         <form action={approve} className="flex-1">
           <button
             type="submit"
-            className="press w-full h-11 rounded-full bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-1.5 shadow-pop"
+            className="press w-full h-11 rounded-full bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-1.5 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card disabled:opacity-60"
             disabled={!pending}
           >
             <CheckCircle2 className="size-4" strokeWidth={2.4} />
@@ -273,7 +273,7 @@ function ReviewCard({
         <form action={reject}>
           <button
             type="submit"
-            className="press h-11 px-4 rounded-full bg-card border border-border font-medium text-sm flex items-center justify-center gap-1.5"
+            className="press h-11 px-4 rounded-full bg-card border border-border font-medium text-sm flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             <X className="size-4" strokeWidth={2.2} />
             דלג
@@ -282,8 +282,8 @@ function ReviewCard({
         <form action={del}>
           <button
             type="submit"
-            className="press size-11 rounded-full bg-destructive/10 text-destructive border border-destructive/20 flex items-center justify-center"
-            aria-label="מחק ליד"
+            className="press size-11 rounded-full bg-destructive/10 text-destructive border border-destructive/20 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
+            aria-label={`מחק את ${lead.name}`}
           >
             <Trash2 className="size-4" strokeWidth={2.2} />
           </button>

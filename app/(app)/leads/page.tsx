@@ -88,10 +88,18 @@ export default async function LeadsListPage({
         </div>
       </header>
 
-      <form className="relative">
-        <Search className="absolute right-3.5 top-1/2 -translate-y-1/2 size-[18px] text-muted-foreground" />
+      <form className="relative" role="search">
+        <label htmlFor="leads-search" className="sr-only">
+          חיפוש לידים
+        </label>
+        <Search
+          className="absolute right-3.5 top-1/2 -translate-y-1/2 size-[18px] text-muted-foreground pointer-events-none"
+          aria-hidden="true"
+        />
         <input
+          id="leads-search"
           name="q"
+          type="search"
           defaultValue={q}
           placeholder="חיפוש שם, טלפון, מייל…"
           className="w-full h-12 pr-11 pl-4 rounded-2xl border border-border bg-card text-[15px] shadow-soft placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition"
@@ -113,8 +121,9 @@ export default async function LeadsListPage({
             <Link
               key={f.v}
               href={`/leads?${params}`}
+              aria-current={active ? "page" : undefined}
               className={
-                "press px-3.5 h-9 rounded-full text-[13px] font-semibold whitespace-nowrap flex items-center transition-colors duration-150 " +
+                "press px-3.5 h-9 rounded-full text-[13px] font-semibold whitespace-nowrap flex items-center transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background " +
                 (active
                   ? "bg-primary text-primary-foreground shadow-soft"
                   : "bg-card border border-border text-muted-foreground")
@@ -177,8 +186,8 @@ export default async function LeadsListPage({
               <div className="flex flex-col gap-1.5 shrink-0">
                 <a
                   href={telLink(l.phone)}
-                  className="press size-10 rounded-full bg-primary-soft text-primary flex items-center justify-center"
-                  aria-label="חייג"
+                  className="press size-11 rounded-full bg-primary-soft text-primary flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+                  aria-label={`חייג ל${l.name}`}
                 >
                   <Phone className="size-[18px]" strokeWidth={2.2} />
                 </a>
@@ -186,8 +195,8 @@ export default async function LeadsListPage({
                   href={whatsappLink(l.phone)}
                   target="_blank"
                   rel="noreferrer"
-                  className="press size-10 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"
-                  aria-label="וואטסאפ"
+                  className="press size-11 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+                  aria-label={`שלח וואטסאפ ל${l.name}`}
                 >
                   <MessageCircle className="size-[18px]" strokeWidth={2.2} />
                 </a>

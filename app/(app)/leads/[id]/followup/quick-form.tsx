@@ -34,8 +34,8 @@ export function FollowupQuickForm({
 
   return (
     <form action={action} className="space-y-5">
-      <div>
-        <label className="text-sm font-medium block mb-2">בחירה מהירה</label>
+      <fieldset>
+        <legend className="text-sm font-medium block mb-2">בחירה מהירה</legend>
         <div className="grid grid-cols-2 gap-2">
           {QUICK_OPTIONS.map((o) => {
             const d = o.build();
@@ -46,8 +46,9 @@ export function FollowupQuickForm({
                 key={o.label}
                 type="button"
                 onClick={() => setDueLocal(v)}
+                aria-pressed={active}
                 className={cn(
-                  "h-12 rounded-lg border text-sm font-medium active:scale-95 transition",
+                  "press h-12 rounded-lg border text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
                   active
                     ? "bg-primary text-primary-foreground border-primary"
                     : "bg-card"
@@ -58,7 +59,7 @@ export function FollowupQuickForm({
             );
           })}
         </div>
-      </div>
+      </fieldset>
 
       <div>
         <label htmlFor="dueAt" className="text-sm font-medium block mb-1.5">
@@ -89,7 +90,7 @@ export function FollowupQuickForm({
 
       <button
         type="submit"
-        className="w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium active:scale-[0.98] transition"
+        className="press w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
       >
         קבע פולואפ
       </button>

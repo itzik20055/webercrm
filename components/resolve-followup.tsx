@@ -190,7 +190,7 @@ function BackHeader({ title, onBack }: { title: string; onBack: () => void }) {
       <button
         type="button"
         onClick={onBack}
-        className="press size-9 -mr-2 rounded-full flex items-center justify-center hover:bg-accent"
+        className="press size-11 -mr-2 rounded-full flex items-center justify-center hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         aria-label="חזרה"
       >
         <ChevronLeft className="size-5 rotate-180" />

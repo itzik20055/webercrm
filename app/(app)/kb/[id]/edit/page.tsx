@@ -35,8 +35,8 @@ export default async function EditKbPage({
         <div className="flex items-center gap-2 min-w-0">
           <Link
             href="/kb"
-            className="size-9 -mr-2 rounded-full flex items-center justify-center hover:bg-accent shrink-0"
-            aria-label="חזרה"
+            className="press size-11 -mr-2 rounded-full flex items-center justify-center hover:bg-accent shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="חזרה לספר הידע"
           >
             <ChevronRight className="size-5" />
           </Link>

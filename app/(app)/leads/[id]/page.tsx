@@ -13,6 +13,7 @@ import {
   Building2,
   Languages,
   Globe,
+  AlertTriangle,
 } from "lucide-react";
 import { db, leads, interactions, followups } from "@/db";
 import { eq, desc, and, isNull } from "drizzle-orm";
@@ -61,22 +62,22 @@ export default async function LeadPage({
   const localNow = localTimeLabel(lead.audience);
 
   return (
-    <div className="pb-8">
+    <div className="pb-24">
       <header className="sticky top-0 z-20 bg-background/85 backdrop-blur-xl border-b border-border/60 px-4 py-3 flex items-center gap-2">
         <Link
           href="/leads"
-          className="press size-10 -mr-2 rounded-full flex items-center justify-center hover:bg-accent"
-          aria-label="חזרה"
+          className="press size-11 -mr-2 rounded-full flex items-center justify-center hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label="חזרה לרשימת לידים"
         >
-          <ChevronRight className="size-[18px]" />
+          <ChevronRight className="size-[20px]" />
         </Link>
         <h1 className="text-base font-bold flex-1 truncate tracking-tight">{lead.name}</h1>
         <Link
           href={`/leads/${id}/edit`}
-          className="press size-10 rounded-full flex items-center justify-center hover:bg-accent"
-          aria-label="עריכה"
+          className="press size-11 rounded-full flex items-center justify-center hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label={`עריכת ${lead.name}`}
         >
-          <Pencil className="size-[16px]" />
+          <Pencil className="size-[18px]" />
         </Link>
         <DeleteLeadButton leadId={lead.id} leadName={lead.name} />
       </header>
@@ -85,7 +86,8 @@ export default async function LeadPage({
         <div className="grid grid-cols-3 gap-2">
           <a
             href={telLink(lead.phone)}
-            className="press flex flex-col items-center gap-1.5 py-3.5 rounded-2xl bg-primary-soft text-primary border border-primary/10"
+            className="press flex flex-col items-center gap-1.5 py-3.5 rounded-2xl bg-primary-soft text-primary border border-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label={`חייג ל${lead.name}`}
           >
             <Phone className="size-5" strokeWidth={2.2} />
             <span className="text-xs font-semibold">חייג</span>
@@ -94,24 +96,31 @@ export default async function LeadPage({
             href={whatsappLink(lead.phone)}
             target="_blank"
             rel="noreferrer"
-            className="press flex flex-col items-center gap-1.5 py-3.5 rounded-2xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border border-emerald-500/15"
+            className="press flex flex-col items-center gap-1.5 py-3.5 rounded-2xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border border-emerald-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+            aria-label={`וואטסאפ ל${lead.name}`}
           >
             <MessageCircle className="size-5" strokeWidth={2.2} />
             <span className="text-xs font-semibold">וואטסאפ</span>
           </a>
-          <a
-            href={lead.email ? `mailto:${lead.email}` : "#"}
-            aria-disabled={!lead.email}
-            className={
-              "flex flex-col items-center gap-1.5 py-3.5 rounded-2xl border " +
-              (lead.email
-                ? "press bg-blue-500/12 text-blue-700 dark:text-blue-300 border-blue-500/15"
-                : "bg-muted/60 text-muted-foreground border-transparent pointer-events-none")
-            }
-          >
-            <Mail className="size-5" strokeWidth={2.2} />
-            <span className="text-xs font-semibold">מייל</span>
-          </a>
+          {lead.email ? (
+            <a
+              href={`mailto:${lead.email}`}
+              className="press flex flex-col items-center gap-1.5 py-3.5 rounded-2xl border bg-blue-500/12 text-blue-700 dark:text-blue-300 border-blue-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <Mail className="size-5" strokeWidth={2.2} />
+              <span className="text-xs font-semibold">מייל</span>
+            </a>
+          ) : (
+            <button
+              type="button"
+              disabled
+              aria-label="אין כתובת מייל"
+              className="flex flex-col items-center gap-1.5 py-3.5 rounded-2xl border bg-muted/60 text-muted-foreground border-transparent cursor-not-allowed opacity-60"
+            >
+              <Mail className="size-5" strokeWidth={2.2} />
+              <span className="text-xs font-semibold">מייל</span>
+            </button>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-1.5 text-xs">
@@ -132,7 +141,12 @@ export default async function LeadPage({
           </Chip>
           <Chip icon={<Globe className="size-3.5" />}>
             {AUDIENCE_LABELS[lead.audience]} · {localNow}
-            {!goodTime && <span className="text-amber-600 font-semibold"> · לא זמן טוב</span>}
+            {!goodTime && (
+              <span className="text-amber-700 dark:text-amber-400 font-semibold inline-flex items-center gap-0.5">
+                <AlertTriangle className="size-3" strokeWidth={2.4} aria-hidden="true" />
+                לא זמן טוב
+              </span>
+            )}
           </Chip>
           <Chip>הגיע דרך: {CHANNEL_LABELS[lead.channelFirst]}</Chip>
           {lead.source && <Chip>מקור: {lead.source}</Chip>}
@@ -172,10 +186,17 @@ export default async function LeadPage({
                     <div>
                       <div
                         className={
-                          "text-sm font-medium " +
+                          "text-sm font-medium flex items-center gap-1 " +
                           (overdue ? "text-destructive" : "")
                         }
                       >
+                        {overdue && (
+                          <AlertTriangle
+                            className="size-3.5 shrink-0"
+                            strokeWidth={2.4}
+                            aria-label="באיחור"
+                          />
+                        )}
                         {fullDate(f.dueAt)}
                       </div>
                       {f.reason && (
@@ -327,14 +348,14 @@ export default async function LeadPage({
         <div className="max-w-lg mx-auto flex gap-2 pointer-events-auto">
           <a
             href="#capture"
-            className="press flex-1 h-12 rounded-full bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 shadow-pop"
+            className="press flex-1 h-12 rounded-full bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <MessageSquarePlus className="size-5" strokeWidth={2.2} />
             תיעוד שיחה
           </a>
           <Link
             href={`/leads/${id}/followup`}
-            className="press h-12 px-5 rounded-full bg-card border border-border font-semibold flex items-center justify-center gap-2 shadow-pop"
+            className="press h-12 px-5 rounded-full bg-card border border-border font-semibold flex items-center justify-center gap-2 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <BellRing className="size-5" strokeWidth={2.2} />
             פולואפ

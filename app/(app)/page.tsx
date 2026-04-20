@@ -12,6 +12,7 @@ import {
   Clock,
   CalendarDays,
   Inbox,
+  Flame,
 } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
 import { telLink, whatsappLink } from "@/lib/format";
@@ -81,7 +82,12 @@ export default async function HomePage() {
           </div>
           <div className="mt-3 grid grid-cols-3 gap-3">
             <Stat label="פעילים" value={counts.active} />
-            <Stat label="חמים" value={counts.hot} warn={counts.hot > 0} />
+            <Stat
+              label="חמים"
+              value={counts.hot}
+              warn={counts.hot > 0}
+              icon={counts.hot > 0 ? <Flame className="size-3.5" strokeWidth={2.4} /> : null}
+            />
             <Stat label="סגורים" value={counts.booked} accent />
           </div>
         </div>
@@ -149,11 +155,13 @@ function Stat({
   value,
   accent,
   warn,
+  icon,
 }: {
   label: string;
   value: number;
   accent?: boolean;
   warn?: boolean;
+  icon?: React.ReactNode;
 }) {
   return (
     <div>
@@ -165,7 +173,8 @@ function Stat({
       >
         {value}
       </div>
-      <div className="text-[11px] font-medium text-white/70 mt-1 tracking-tight">
+      <div className="text-[11px] font-medium text-white/70 mt-1 tracking-tight flex items-center gap-1">
+        {icon}
         {label}
       </div>
     </div>
@@ -284,8 +293,8 @@ function ActionCard({
       <div className="flex gap-1.5 shrink-0">
         <a
           href={telLink(action.leadPhone)}
-          className="press size-10 rounded-full bg-primary-soft text-primary flex items-center justify-center"
-          aria-label="חייג"
+          className="press size-11 rounded-full bg-primary-soft text-primary flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          aria-label={`חייג ל${action.leadName}`}
         >
           <Phone className="size-[18px]" strokeWidth={2.2} />
         </a>
@@ -293,8 +302,8 @@ function ActionCard({
           href={whatsappLink(action.leadPhone)}
           target="_blank"
           rel="noreferrer"
-          className="press size-10 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"
-          aria-label="וואטסאפ"
+          className="press size-11 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-card"
+          aria-label={`וואטסאפ ל${action.leadName}`}
         >
           <MessageCircle className="size-[18px]" strokeWidth={2.2} />
         </a>

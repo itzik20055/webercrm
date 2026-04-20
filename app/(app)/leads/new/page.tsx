@@ -18,8 +18,8 @@ export default async function NewLeadPage({
       <header className="flex items-center gap-2 mb-5">
         <Link
           href="/leads"
-          className="size-9 -mr-2 rounded-full flex items-center justify-center hover:bg-accent"
-          aria-label="חזרה"
+          className="press size-11 -mr-2 rounded-full flex items-center justify-center hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label="חזרה לרשימת לידים"
         >
           <ChevronRight className="size-5" />
         </Link>
@@ -27,23 +27,26 @@ export default async function NewLeadPage({
       </header>
 
       <form action={createLead} className="space-y-4" autoComplete="off">
-        <Field label="שם *" required>
+        <Field label="שם" required>
           <input
             name="name"
             required
             autoFocus
+            inputMode="text"
+            autoComplete="name"
             defaultValue={sp.name ?? ""}
             placeholder="שם הלקוח"
             className="form-input"
           />
         </Field>
 
-        <Field label="טלפון *" required>
+        <Field label="טלפון" required>
           <input
             name="phone"
             type="tel"
             required
             inputMode="tel"
+            autoComplete="tel"
             defaultValue={sp.phone ?? ""}
             placeholder="050-1234567 או +1..."
             className="form-input"
@@ -55,6 +58,7 @@ export default async function NewLeadPage({
             name="email"
             type="email"
             inputMode="email"
+            autoComplete="email"
             placeholder="לא חובה"
             className="form-input"
           />
@@ -106,13 +110,13 @@ export default async function NewLeadPage({
         <div className="flex gap-3 pt-3">
           <Link
             href="/leads"
-            className="flex-1 h-12 rounded-lg border flex items-center justify-center font-medium"
+            className="press flex-1 h-12 rounded-lg border flex items-center justify-center font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             ביטול
           </Link>
           <button
             type="submit"
-            className="flex-[2] h-12 rounded-lg bg-primary text-primary-foreground font-medium active:scale-[0.98] transition"
+            className="press flex-[2] h-12 rounded-lg bg-primary text-primary-foreground font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
           >
             שמור ליד
           </button>
@@ -150,7 +154,11 @@ function Field({
     <label className="block space-y-1.5">
       <span className="text-sm font-medium">
         {label}
-        {required && <span className="text-destructive"> </span>}
+        {required && (
+          <span className="text-destructive mr-0.5" aria-label="חובה">
+            *
+          </span>
+        )}
       </span>
       {children}
     </label>

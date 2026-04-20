@@ -8,6 +8,8 @@ import {
   BookOpen,
   ChevronLeft,
   Phone,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { db, pushSubscriptions, leads, productKb } from "@/db";
 import { sql } from "drizzle-orm";
@@ -67,33 +69,40 @@ export default async function SettingsPage() {
       </Section>
 
       <Section title="ייבוא וואטסאפ + AI" icon={<MessageCircle className="size-4" />}>
-        <p className="text-sm text-muted-foreground">
-          השם שלך כפי שהוא מופיע בוואטסאפ ללקוחות. נחוץ כדי שה-AI ידע מה אתה
-          שלחת ומה הלקוח שלח.
-        </p>
         <form action={saveWhatsAppName} className="space-y-2">
+          <label htmlFor="whatsapp-name" className="text-sm text-muted-foreground block">
+            השם שלך כפי שהוא מופיע בוואטסאפ ללקוחות. נחוץ כדי שה-AI ידע מה אתה
+            שלחת ומה הלקוח שלח.
+          </label>
           <input
+            id="whatsapp-name"
             name="name"
             type="text"
+            inputMode="text"
+            autoComplete="name"
             defaultValue={whatsappName ?? ""}
             placeholder="לדוגמה: איציק וובר"
-            className="w-full h-11 px-3 rounded-lg border bg-background"
+            className="w-full h-11 px-3 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
             dir="rtl"
           />
           <button
             type="submit"
-            className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-medium active:scale-[0.99]"
+            className="press w-full h-11 rounded-lg bg-primary text-primary-foreground font-medium"
           >
             שמור
           </button>
         </form>
-        <div className="text-xs text-muted-foreground pt-2 border-t">
-          מפתח Vercel AI Gateway:{" "}
+        <div className="text-xs text-muted-foreground pt-2 border-t flex items-start gap-1.5">
+          <span>מפתח Vercel AI Gateway:</span>
           {hasGatewayKey ? (
-            <span className="text-emerald-600 font-medium">מוגדר ✓</span>
+            <span className="text-emerald-700 dark:text-emerald-400 font-medium inline-flex items-center gap-1">
+              <CheckCircle2 className="size-3.5 shrink-0" aria-hidden="true" />
+              מוגדר
+            </span>
           ) : (
-            <span className="text-amber-600 font-medium">
-              חסר — הוסף AI_GATEWAY_API_KEY ב-.env.local
+            <span className="text-amber-700 dark:text-amber-400 font-medium inline-flex items-start gap-1">
+              <AlertTriangle className="size-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+              <span>חסר — הוסף AI_GATEWAY_API_KEY ב-.env.local</span>
             </span>
           )}
         </div>
@@ -130,7 +139,7 @@ export default async function SettingsPage() {
       <form action="/api/auth/logout" method="post">
         <button
           type="submit"
-          className="w-full h-12 rounded-lg border border-destructive/30 text-destructive font-medium flex items-center justify-center gap-2 active:scale-[0.99] transition"
+          className="press w-full h-12 rounded-lg border border-destructive/50 bg-destructive/5 text-destructive font-medium flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
         >
           <LogOut className="size-4" />
           התנתק

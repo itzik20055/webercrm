@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { AlertTriangle } from "lucide-react";
 import { login, isAuthenticated } from "@/lib/session";
 
 export default async function LoginPage({
@@ -37,15 +38,26 @@ export default async function LoginPage({
           type="password"
           required
           autoFocus
+          autoComplete="current-password"
+          aria-invalid={sp.error ? "true" : undefined}
+          aria-describedby={sp.error ? "login-error" : undefined}
           className="w-full h-12 px-4 rounded-lg border border-input bg-card text-base focus:outline-none focus:ring-2 focus:ring-ring"
         />
       </div>
       {sp.error && (
-        <p className="text-sm text-destructive">סיסמה שגויה</p>
+        <p
+          id="login-error"
+          role="alert"
+          aria-live="polite"
+          className="text-sm text-destructive flex items-center gap-1.5"
+        >
+          <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+          סיסמה שגויה
+        </p>
       )}
       <button
         type="submit"
-        className="w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium text-base active:scale-[0.98] transition"
+        className="press w-full h-12 rounded-lg bg-primary text-primary-foreground font-medium text-base focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
       >
         כניסה
       </button>

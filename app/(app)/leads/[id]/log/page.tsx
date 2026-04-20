@@ -27,8 +27,8 @@ export default async function LogInteractionPage({
       <header className="flex items-center gap-2 mb-5">
         <Link
           href={`/leads/${id}`}
-          className="size-9 -mr-2 rounded-full flex items-center justify-center hover:bg-accent"
-          aria-label="חזרה"
+          className="press size-11 -mr-2 rounded-full flex items-center justify-center hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label={`חזרה ל${lead.name}`}
         >
           <ChevronRight className="size-5" />
         </Link>
@@ -40,8 +40,10 @@ export default async function LogInteractionPage({
 
       <form action={action} className="space-y-4">
         <div>
-          <label className="text-sm font-medium block mb-1.5">סוג</label>
-          <select name="type" defaultValue="whatsapp" className="form-input">
+          <label htmlFor="interaction-type" className="text-sm font-medium block mb-1.5">
+            סוג
+          </label>
+          <select id="interaction-type" name="type" defaultValue="whatsapp" className="form-input">
             {Object.entries(INTERACTION_TYPE_LABELS).map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
@@ -50,8 +52,8 @@ export default async function LogInteractionPage({
           </select>
         </div>
 
-        <div>
-          <label className="text-sm font-medium block mb-1.5">כיוון</label>
+        <fieldset>
+          <legend className="text-sm font-medium block mb-1.5">כיוון</legend>
           <div className="grid grid-cols-3 gap-2">
             {[
               { v: "in", l: "נכנס" },
@@ -66,19 +68,26 @@ export default async function LogInteractionPage({
                   defaultChecked={d.v === "in"}
                   className="peer sr-only"
                 />
-                <div className="h-10 rounded-lg border bg-card flex items-center justify-center text-sm font-medium peer-checked:bg-primary peer-checked:text-primary-foreground peer-checked:border-primary cursor-pointer transition active:scale-95">
+                <div className="h-11 rounded-lg border bg-card flex items-center justify-center text-sm font-medium peer-checked:bg-primary peer-checked:text-primary-foreground peer-checked:border-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary cursor-pointer transition active:scale-95">
                   {d.l}
                 </div>
               </label>
             ))}
           </div>
-        </div>
+        </fieldset>
 
         <div>
-          <label className="text-sm font-medium block mb-1.5">
-            תוכן (תוכל להדביק וואטסאפ במלואו)
+          <label htmlFor="interaction-content" className="text-sm font-medium block mb-1.5">
+            תוכן{" "}
+            <span className="text-destructive" aria-label="חובה">
+              *
+            </span>{" "}
+            <span className="text-xs text-muted-foreground font-normal">
+              (תוכל להדביק וואטסאפ במלואו)
+            </span>
           </label>
           <textarea
+            id="interaction-content"
             name="content"
             required
             rows={10}
@@ -89,8 +98,11 @@ export default async function LogInteractionPage({
         </div>
 
         <div>
-          <label className="text-sm font-medium block mb-1.5">משך (דקות)</label>
+          <label htmlFor="interaction-duration" className="text-sm font-medium block mb-1.5">
+            משך (דקות)
+          </label>
           <input
+            id="interaction-duration"
             name="durationMin"
             type="number"
             inputMode="numeric"
@@ -103,13 +115,13 @@ export default async function LogInteractionPage({
         <div className="flex gap-3 pt-3">
           <Link
             href={`/leads/${id}`}
-            className="flex-1 h-12 rounded-lg border flex items-center justify-center font-medium"
+            className="press flex-1 h-12 rounded-lg border flex items-center justify-center font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             ביטול
           </Link>
           <button
             type="submit"
-            className="flex-[2] h-12 rounded-lg bg-primary text-primary-foreground font-medium active:scale-[0.98] transition"
+            className="press flex-[2] h-12 rounded-lg bg-primary text-primary-foreground font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
           >
             שמור תיעוד
           </button>

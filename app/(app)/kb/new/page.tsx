@@ -27,8 +27,8 @@ export default async function NewKbPage({
       <header className="flex items-center gap-2 mb-5">
         <Link
           href="/kb"
-          className="size-9 -mr-2 rounded-full flex items-center justify-center hover:bg-accent"
-          aria-label="חזרה"
+          className="press size-11 -mr-2 rounded-full flex items-center justify-center hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label="חזרה לספר הידע"
         >
           <ChevronRight className="size-5" />
         </Link>
