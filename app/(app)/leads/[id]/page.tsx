@@ -30,6 +30,7 @@ import { InterestTags } from "@/components/interest-tags";
 import { ResolveFollowupButton } from "@/components/resolve-followup";
 import { CopyChip } from "@/components/copy-chip";
 import { DraftCard } from "@/components/draft-card";
+import { CaptureCard } from "@/components/capture-card";
 
 export const dynamic = "force-dynamic";
 
@@ -194,6 +195,8 @@ export default async function LeadPage({
           )}
         </Card>
 
+        <CaptureCard leadId={lead.id} />
+
         <DraftCard leadId={lead.id} leadPhone={lead.phone} />
 
         <Card
@@ -281,20 +284,17 @@ export default async function LeadPage({
           title="היסטוריית שיחות"
           icon={<MessageSquarePlus className="size-4" />}
           action={
-            <Link
-              href={`/leads/${id}/log`}
-              className="text-xs font-medium text-primary"
-            >
+            <a href="#capture" className="text-xs font-medium text-primary">
               + תיעוד חדש
-            </Link>
+            </a>
           }
         >
           {recentInteractions.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               עדיין לא תועדה אינטראקציה.{" "}
-              <Link href={`/leads/${id}/log`} className="text-primary">
+              <a href="#capture" className="text-primary">
                 תעד את הראשונה
-              </Link>
+              </a>
             </p>
           ) : (
             <ul className="space-y-3">
@@ -325,13 +325,13 @@ export default async function LeadPage({
 
       <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+72px)] inset-x-0 px-4 z-20 pointer-events-none">
         <div className="max-w-lg mx-auto flex gap-2 pointer-events-auto">
-          <Link
-            href={`/leads/${id}/log`}
+          <a
+            href="#capture"
             className="press flex-1 h-12 rounded-full bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 shadow-pop"
           >
             <MessageSquarePlus className="size-5" strokeWidth={2.2} />
             תיעוד שיחה
-          </Link>
+          </a>
           <Link
             href={`/leads/${id}/followup`}
             className="press h-12 px-5 rounded-full bg-card border border-border font-semibold flex items-center justify-center gap-2 shadow-pop"
