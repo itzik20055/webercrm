@@ -97,6 +97,8 @@ export const leads = pgTable(
     followupCompletedAt: timestamp({ withTimezone: true }),
     priority: priorityEnum().notNull().default("warm"),
     notes: text(),
+    needsReview: boolean().notNull().default(false),
+    pendingExtraction: jsonb(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
@@ -106,6 +108,7 @@ export const leads = pgTable(
     index("leads_next_followup_idx").on(t.nextFollowupAt),
     index("leads_priority_idx").on(t.priority),
     index("leads_created_idx").on(t.createdAt),
+    index("leads_needs_review_idx").on(t.needsReview),
   ]
 );
 

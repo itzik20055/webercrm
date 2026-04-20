@@ -1,7 +1,7 @@
 import { db, leads, interactions } from "@/db";
 import { sql } from "drizzle-orm";
 import { normalizePhone, phoneTail } from "./phone";
-import { transcribeAudio } from "./ai-client";
+import { transcribeAudio, extractLeadFromChat } from "./ai-client";
 import type { CallRecordingMail } from "./gmail-imap";
 
 export interface CallMeta {
@@ -121,11 +121,40 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
     aiSummary: null,
   });
 
+  // Run AI extraction on the transcript (if we have one) and stash the result
+  // as a pending review. The user approves or rejects via the /inbox page —
+  // we deliberately don't auto-apply because phone transcripts are noisier
+  // than WhatsApp and false positives would pollute the lead record.
+  let pendingExtraction: unknown = null;
+  let needsReview = false;
+  if (transcript && transcript.length > 20) {
+    try {
+      const { lead: extracted } = await extractLeadFromChat({
+        chatText: transcript,
+        leadName: createdNew ? null : lead.name,
+        ourName: "איציק",
+        knownLeadId: lead.id,
+      });
+      pendingExtraction = {
+        ...extracted,
+        source: "phone_call",
+        transcriptPreview: transcript.slice(0, 500),
+        extractedAt: new Date().toISOString(),
+      };
+      needsReview = true;
+    } catch (e) {
+      console.error("[call-recording] extractLeadFromChat failed", lead.id, e);
+    }
+  }
+
   await db
     .update(leads)
     .set({
       updatedAt: new Date(),
       status: sql`case when ${leads.status} = 'new' then 'contacted'::lead_status else ${leads.status} end`,
+      ...(needsReview
+        ? { needsReview: true, pendingExtraction: pendingExtraction as object }
+        : {}),
     })
     .where(sql`${leads.id} = ${lead.id}`);
 

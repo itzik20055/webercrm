@@ -2,18 +2,25 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Users, BellRing, GraduationCap, Settings } from "lucide-react";
+import { Home, Users, BellRing, Inbox, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const items = [
+type NavItem = {
+  href: string;
+  icon: typeof Home;
+  label: string;
+  badge?: boolean;
+};
+
+const items: NavItem[] = [
   { href: "/", icon: Home, label: "בית" },
   { href: "/leads", icon: Users, label: "לידים" },
   { href: "/followups", icon: BellRing, label: "פולואפים" },
-  { href: "/train", icon: GraduationCap, label: "אימון" },
+  { href: "/inbox", icon: Inbox, label: "תיבה", badge: true },
   { href: "/settings", icon: Settings, label: "הגדרות" },
 ];
 
-export function BottomNav() {
+export function BottomNav({ inboxCount = 0 }: { inboxCount?: number }) {
   const pathname = usePathname();
   return (
     <nav
@@ -21,9 +28,10 @@ export function BottomNav() {
       aria-label="ניווט ראשי"
     >
       <ul className="grid grid-cols-5 max-w-lg mx-auto px-2 pt-1.5 pb-1">
-        {items.map(({ href, icon: Icon, label }) => {
+        {items.map(({ href, icon: Icon, label, badge }) => {
           const active =
             href === "/" ? pathname === "/" : pathname.startsWith(href);
+          const showBadge = badge && inboxCount > 0;
           return (
             <li key={href}>
               <Link
@@ -32,7 +40,7 @@ export function BottomNav() {
               >
                 <span
                   className={cn(
-                    "flex items-center justify-center h-7 w-12 rounded-full transition-colors duration-200",
+                    "relative flex items-center justify-center h-7 w-12 rounded-full transition-colors duration-200",
                     active && "bg-primary-soft"
                   )}
                 >
@@ -44,6 +52,14 @@ export function BottomNav() {
                         : "text-muted-foreground"
                     )}
                   />
+                  {showBadge && (
+                    <span
+                      className="absolute -top-0.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center tabular-nums ring-2 ring-card"
+                      aria-label={`${inboxCount} ממתינים לאישור`}
+                    >
+                      {inboxCount > 99 ? "99+" : inboxCount}
+                    </span>
+                  )}
                 </span>
                 <span
                   className={cn(

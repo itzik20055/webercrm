@@ -1,12 +1,18 @@
 import { BottomNav } from "@/components/bottom-nav";
 import { GlobalCaptureFab } from "@/components/global-capture-fab";
+import { getInboxCount } from "@/lib/inbox-count";
 
-export default function AppLayout({ children }: { children: React.ReactNode }) {
+export default async function AppLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const inboxCount = await getInboxCount().catch(() => 0);
   return (
     <div className="min-h-dvh flex flex-col bg-background">
       <main className="flex-1 pb-24 max-w-lg w-full mx-auto">{children}</main>
       <GlobalCaptureFab />
-      <BottomNav />
+      <BottomNav inboxCount={inboxCount} />
     </div>
   );
 }

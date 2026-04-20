@@ -30,6 +30,7 @@ import { InterestTags } from "@/components/interest-tags";
 import { ResolveFollowupButton } from "@/components/resolve-followup";
 import { CopyChip } from "@/components/copy-chip";
 import { DraftCard } from "@/components/draft-card";
+import { DeleteLeadButton } from "@/components/delete-lead-button";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,7 @@ export default async function LeadPage({
         >
           <Pencil className="size-[16px]" />
         </Link>
+        <DeleteLeadButton leadId={lead.id} leadName={lead.name} />
       </header>
 
       <div className="px-4 pt-4 space-y-5">
