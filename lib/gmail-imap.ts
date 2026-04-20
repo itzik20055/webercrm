@@ -4,7 +4,9 @@ import { eq } from "drizzle-orm";
 import { db, appSettings } from "@/db";
 
 const SENDER = "donotreply@aloha.global";
-const LOOKBACK_DAYS = 14;
+// Short lookback: just enough to catch emails that arrive with a small delay
+// from Free Telecom. We never want to dig into the past — only forward.
+const LOOKBACK_DAYS = 2;
 const PROCESSED_KEY = "call_recordings_processed_uids";
 const MAX_TRACKED_UIDS = 500;
 
@@ -185,19 +187,36 @@ export async function countPendingCallRecordings(): Promise<{
 }
 
 /**
- * Clears the processed-UIDs set so every email in the lookback window will be
- * reconsidered. Used when the user wants a fresh backfill (e.g. after
- * deleting leads created from old recordings).
+ * Marks every Call Recording email currently visible in the lookback window
+ * as "already processed", without actually transcribing them. Used to
+ * draw a line in the sand: "everything from here back — ignore; only new
+ * emails from this moment forward should be picked up."
  */
-export async function resetProcessedUids(): Promise<void> {
-  await db
-    .insert(appSettings)
-    .values({ key: PROCESSED_KEY, value: "[]", updatedAt: new Date() })
-    .onConflictDoUpdate({
-      target: appSettings.key,
-      set: { value: "[]", updatedAt: new Date() },
-    });
-  console.log("[gmail-imap] processed UIDs set reset");
+export async function skipAllPastCallRecordings(): Promise<{ skipped: number }> {
+  const client = await openClient();
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - LOOKBACK_DAYS);
+    const uids = (await client.search({
+      from: SENDER,
+      subject: "Call Recording",
+      since,
+    } as never)) as number[] | null;
+    const all = uids ?? [];
+    if (all.length === 0) {
+      console.log("[gmail-imap] skip-past: nothing in window");
+      return { skipped: 0 };
+    }
+    await markProcessed(all);
+    console.log("[gmail-imap] skip-past: marked", all.length, "as processed");
+    return { skipped: all.length };
+  } finally {
+    try {
+      await client.logout();
+    } catch {
+      /* swallow */
+    }
+  }
 }
 
 /**

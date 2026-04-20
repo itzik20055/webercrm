@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Download, RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { Download, RefreshCw, AlertTriangle, CheckCircle2, SkipForward } from "lucide-react";
 import {
   pullCallRecordingsNow,
-  resetCallRecordingsHistory,
+  skipPastCallRecordings,
   getCallRecordingsStatus,
 } from "./call-recordings-actions";
 import type { PullResult } from "@/lib/call-recordings-runner";
@@ -32,7 +32,8 @@ export function CallRecordingsPanel({
       : { state: "ok", total: initial.total, pending: initial.pending }
   );
   const [pull, setPull] = useState<PullState>({ state: "idle" });
-  const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmSkip, setConfirmSkip] = useState(false);
+  const [skipMessage, setSkipMessage] = useState<string | null>(null);
   const [, startTransition] = useTransition();
 
   const refreshStatus = () => {
@@ -63,12 +64,17 @@ export function CallRecordingsPanel({
     });
   };
 
-  const doReset = () => {
-    setConfirmReset(false);
+  const doSkip = () => {
+    setConfirmSkip(false);
+    setSkipMessage(null);
     startTransition(async () => {
       try {
-        await resetCallRecordingsHistory();
-        setPull({ state: "idle" });
+        const r = await skipPastCallRecordings();
+        setSkipMessage(
+          r.skipped === 0
+            ? "אין הקלטות ישנות בחלון — כבר הכול נקי."
+            : `${r.skipped} הקלטות ישנות סומנו כמטופלות. מכאן והלאה רק שיחות חדשות ייכנסו.`
+        );
         refreshStatus();
       } catch (e) {
         setPull({
@@ -82,8 +88,9 @@ export function CallRecordingsPanel({
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        ה-cron מושך אוטומטית כל 10 דקות. אפשר גם להפעיל ידנית, או לאפס את
-        רשימת ה-UIDs המעובדים כדי למשוך מחדש הקלטות מ-14 הימים האחרונים.
+        ה-cron מושך אוטומטית כל 10 דקות רק שיחות חדשות. הכפתור "דלג על ישנות"
+        מסמן את כל ההקלטות הנוכחיות בתור "לא צריך לעבד" — מכאן והלאה רק
+        שיחות שיגיעו מעכשיו ואילך ייכנסו לתיבה.
       </p>
 
       <div className="rounded-xl bg-background border border-border p-3">
@@ -133,11 +140,12 @@ export function CallRecordingsPanel({
         </button>
         <button
           type="button"
-          onClick={() => setConfirmReset(true)}
+          onClick={() => setConfirmSkip(true)}
           disabled={pull.state === "running"}
-          className="press h-11 px-4 rounded-full bg-card border border-border font-medium text-sm"
+          className="press h-11 px-4 rounded-full bg-card border border-border font-medium text-sm flex items-center gap-1.5"
         >
-          אפס היסטוריה
+          <SkipForward className="size-4" />
+          דלג על ישנות
         </button>
       </div>
 
@@ -170,10 +178,17 @@ export function CallRecordingsPanel({
         </div>
       )}
 
-      {confirmReset && (
+      {skipMessage && (
+        <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/25 p-3 text-sm flex items-start gap-1.5">
+          <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-emerald-700 dark:text-emerald-300" />
+          <span className="text-foreground">{skipMessage}</span>
+        </div>
+      )}
+
+      {confirmSkip && (
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center"
-          onClick={() => setConfirmReset(false)}
+          onClick={() => setConfirmSkip(false)}
         >
           <div
             className="bg-card w-full sm:w-auto sm:min-w-[360px] sm:max-w-md rounded-t-3xl sm:rounded-3xl border border-border p-5 space-y-4 shadow-pop"
@@ -181,31 +196,31 @@ export function CallRecordingsPanel({
           >
             <div className="flex items-start gap-3">
               <div className="size-10 rounded-full bg-amber-500/15 text-amber-600 flex items-center justify-center shrink-0">
-                <AlertTriangle className="size-5" strokeWidth={2.2} />
+                <SkipForward className="size-5" strokeWidth={2.2} />
               </div>
               <div>
-                <h3 className="font-bold tracking-tight">לאפס היסטוריה?</h3>
+                <h3 className="font-bold tracking-tight">לדלג על כל הישנות?</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  כל ההקלטות שכבר עובדו ייחשבו לא-מעובדות, וה-cron הבא ינסה
-                  למשוך אותן שוב. השתמש בזה רק אחרי מחיקה של לידים כדי להביא
-                  את כל ה-14 הימים מחדש.
+                  כל ההקלטות שמחכות כרגע בתיבת המייל יסומנו כמטופלות מבלי
+                  לעבד אותן. מהרגע הזה והלאה, רק שיחות חדשות שיגיעו ממעכשיו
+                  ייכנסו לתיבה. פעולה חד-פעמית — לעשות כשמתחילים עונה נקייה.
                 </p>
               </div>
             </div>
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setConfirmReset(false)}
+                onClick={() => setConfirmSkip(false)}
                 className="press flex-1 h-11 rounded-full bg-secondary text-secondary-foreground font-medium text-sm"
               >
                 ביטול
               </button>
               <button
                 type="button"
-                onClick={doReset}
+                onClick={doSkip}
                 className="press flex-1 h-11 rounded-full bg-amber-500 text-white font-semibold text-sm"
               >
-                אפס
+                דלג
               </button>
             </div>
           </div>

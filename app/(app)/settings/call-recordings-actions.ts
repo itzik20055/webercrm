@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { isAuthenticated } from "@/lib/session";
 import {
   countPendingCallRecordings,
-  resetProcessedUids,
+  skipAllPastCallRecordings,
 } from "@/lib/gmail-imap";
 import {
   runCallRecordingsPull,
@@ -39,9 +39,12 @@ export async function pullCallRecordingsNow(): Promise<PullResult> {
   return result;
 }
 
-export async function resetCallRecordingsHistory(): Promise<{ ok: true }> {
+export async function skipPastCallRecordings(): Promise<{
+  ok: true;
+  skipped: number;
+}> {
   await guard();
-  await resetProcessedUids();
+  const { skipped } = await skipAllPastCallRecordings();
   revalidatePath("/settings");
-  return { ok: true };
+  return { ok: true, skipped };
 }
