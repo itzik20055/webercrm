@@ -36,6 +36,13 @@
       "when": 1776698586271,
       "tag": "0004_rare_calypso",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1776726927091,
+      "tag": "0005_voice_examples_scoring",
+      "breakpoints": true
     }
   ]
 }

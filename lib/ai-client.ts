@@ -1,6 +1,6 @@
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
-import { and, cosineDistance, desc, eq, isNotNull } from "drizzle-orm";
+import { and, cosineDistance, desc, eq, gte, isNotNull, lte } from "drizzle-orm";
 import {
   db,
   aiAuditLog,
@@ -16,15 +16,27 @@ import { embedOne } from "./embeddings";
 /** Models we use through Vercel AI Gateway. */
 export const MODELS = {
   /**
-   * Text extraction. Sonnet handles Hebrew nuance and avoids the hallucinations
-   * Haiku produces on multilingual sales conversations. Bumped from Haiku 4.5
-   * after seeing garbled output on real chats.
+   * Structured JSON extraction (lead profile from chat). Sonnet — sufficient
+   * for schema-bound output and avoids the cost of Opus where ניואנס בכתיבה
+   * אינו קריטי.
    */
   extract: "anthropic/claude-sonnet-4.6",
   /**
+   * Customer-facing draft writing (lead replies + Q&A trainer). Opus —
+   * voice/tone matters per message, and this runs every interaction.
+   */
+  draft: "anthropic/claude-opus-4-7",
+  /**
+   * Nightly learning cron — mines warming/cooling signals from conversations
+   * and scores each of איציק's messages. Opus, because the foundational
+   * training signal must be clean: a wrong call here pollutes voice_examples
+   * and degrades every future draft.
+   */
+  learning: "anthropic/claude-opus-4-7",
+  /**
    * Cheap & fast. For routing, classification, knowledge-gap detection — tasks
    * where structure matters more than language nuance. Do NOT use for chat
-   * extraction or customer-facing drafts (see comment on `extract`).
+   * extraction or customer-facing drafts.
    */
   fast: "anthropic/claude-haiku-4-5",
   /**
@@ -209,15 +221,28 @@ async function retrieveKnowledgeForQuery(
  * meaningful query, falls back to plain recency. The strict scope filter
  * stays in place — we never want a Hebrew example bleeding into an English
  * draft.
+ *
+ * Returns both POSITIVE examples (score >= 0, used as "write like this") and
+ * NEGATIVE examples (score <= -0.3, used as "do NOT write like this"). The
+ * learning cron generates score values; manually-saved examples default to
+ * 0.5 so they always count as positive.
  */
+const POSITIVE_SCORE_THRESHOLD = 0;
+const NEGATIVE_SCORE_THRESHOLD = -0.3;
+
 async function retrieveVoiceExamples(args: {
   scenario: string;
   audience: Lead["audience"];
   language: Lead["language"];
   query: string;
   limit?: number;
-}): Promise<{ id: string; finalText: string }[]> {
+  negativeLimit?: number;
+}): Promise<{
+  positive: { id: string; finalText: string; score: number }[];
+  negative: { id: string; finalText: string; score: number }[];
+}> {
   const limit = args.limit ?? 5;
+  const negativeLimit = args.negativeLimit ?? 2;
   const baseFilter = and(
     eq(voiceExamples.scenario, args.scenario as never),
     eq(voiceExamples.audience, args.audience),
@@ -228,30 +253,66 @@ async function retrieveVoiceExamples(args: {
     try {
       const queryEmbedding = await embedOne(args.query);
       const distance = cosineDistance(voiceExamples.embedding, queryEmbedding);
-      const rows = await db
-        .select({ id: voiceExamples.id, finalText: voiceExamples.finalText })
-        .from(voiceExamples)
-        .where(and(baseFilter, isNotNull(voiceExamples.embedding)))
-        .orderBy(distance)
-        .limit(limit);
-      if (rows.length > 0) return rows;
+      const [positive, negative] = await Promise.all([
+        db
+          .select({
+            id: voiceExamples.id,
+            finalText: voiceExamples.finalText,
+            score: voiceExamples.score,
+          })
+          .from(voiceExamples)
+          .where(
+            and(
+              baseFilter,
+              isNotNull(voiceExamples.embedding),
+              gte(voiceExamples.score, POSITIVE_SCORE_THRESHOLD)
+            )
+          )
+          .orderBy(distance)
+          .limit(limit),
+        db
+          .select({
+            id: voiceExamples.id,
+            finalText: voiceExamples.finalText,
+            score: voiceExamples.score,
+          })
+          .from(voiceExamples)
+          .where(
+            and(
+              baseFilter,
+              isNotNull(voiceExamples.embedding),
+              lte(voiceExamples.score, NEGATIVE_SCORE_THRESHOLD)
+            )
+          )
+          .orderBy(distance)
+          .limit(negativeLimit),
+      ]);
+      if (positive.length > 0 || negative.length > 0) {
+        return { positive, negative };
+      }
     } catch {
       // fall through to recency
     }
   }
 
-  return db
-    .select({ id: voiceExamples.id, finalText: voiceExamples.finalText })
+  const positive = await db
+    .select({
+      id: voiceExamples.id,
+      finalText: voiceExamples.finalText,
+      score: voiceExamples.score,
+    })
     .from(voiceExamples)
-    .where(baseFilter)
+    .where(and(baseFilter, gte(voiceExamples.score, POSITIVE_SCORE_THRESHOLD)))
     .orderBy(desc(voiceExamples.createdAt))
     .limit(limit);
+  return { positive, negative: [] };
 }
 
 /**
  * Voice examples for the trainer Q&A — no scenario filter (the trainer is
  * general-purpose), just audience + language. Ranked by similarity to the
- * question when available, otherwise by recency.
+ * question when available, otherwise by recency. Filters to positive-scored
+ * examples only (auto-generated negative examples don't help generic Q&A).
  */
 async function retrieveVoiceExamplesByAudience(
   audience: Lead["audience"],
@@ -261,7 +322,8 @@ async function retrieveVoiceExamplesByAudience(
 ): Promise<{ finalText: string }[]> {
   const baseFilter = and(
     eq(voiceExamples.audience, audience),
-    eq(voiceExamples.language, language)
+    eq(voiceExamples.language, language),
+    gte(voiceExamples.score, POSITIVE_SCORE_THRESHOLD)
   );
 
   if (query.trim()) {
@@ -671,7 +733,7 @@ export async function buildCustomerQAPrompts(
 5. ${langInstruction}
 ${rulesBlock(rules)}${knowledgeBlock}${examplesBlock}`;
 
-  return { systemPrompt, question: input.question, model: MODELS.extract };
+  return { systemPrompt, question: input.question, model: MODELS.draft };
 }
 
 /**
@@ -829,12 +891,25 @@ export async function buildDraftPrompts(
     ? `\n\n--- ידע על המוצר (השתמש בעובדות מכאן בלבד) ---\n\n${knowledge}\n\n--- סוף ---\n`
     : "";
 
-  const examplesBlock =
-    examples.length > 0
-      ? `\n\n--- דוגמאות מאושרות מהעבר (זה הסגנון, הטון והאורך הרצוי — חקה אותם) ---\n\n${examples
-          .map((e, i) => `### דוגמה ${i + 1}\n${e.finalText}`)
-          .join("\n\n")}\n\n--- סוף דוגמאות ---\n`
-      : "\n\n(אין עדיין דוגמאות מאושרות לתרחיש הזה — נסח לפי הכללים והידע על המוצר.)\n";
+  const positiveBlock =
+    examples.positive.length > 0
+      ? `\n\n--- דוגמאות מהעבר שעבדו (זה הסגנון, הטון והאורך הרצוי — חקה אותם) ---\n\n${examples.positive
+          .map(
+            (e, i) =>
+              `### דוגמה ${i + 1} (ציון ${e.score.toFixed(2)})\n${e.finalText}`
+          )
+          .join("\n\n")}\n\n--- סוף דוגמאות חיוביות ---\n`
+      : "\n\n(אין עדיין דוגמאות חיוביות לתרחיש הזה — נסח לפי הכללים והידע על המוצר.)\n";
+
+  const negativeBlock =
+    examples.negative.length > 0
+      ? `\n\n--- ⚠️ דוגמאות שלא עבדו (אל תכתוב כך — אלו הודעות שגרמו ללקוח להתקרר או לשתוק) ---\n\n${examples.negative
+          .map(
+            (e, i) =>
+              `### אנטי־דוגמה ${i + 1} (ציון ${e.score.toFixed(2)})\n${e.finalText}`
+          )
+          .join("\n\n")}\n\n--- סוף אנטי־דוגמאות ---\n`
+      : "";
 
   const interactionsBlock =
     recentInteractions.length > 0
@@ -894,7 +969,7 @@ export async function buildDraftPrompts(
 6. ${langInstruction}
 
 החזר את הטיוטה כטקסט בלבד — בלי הקדמות, בלי הסברים, בלי כותרות, בלי מירכאות סוגרות. רק הטקסט שאיציק יוכל להעתיק ולשלוח.
-${rulesBlock(rules)}${knowledgeBlock}${examplesBlock}`;
+${rulesBlock(rules)}${knowledgeBlock}${positiveBlock}${negativeBlock}`;
 
   const userPrompt = `### תרחיש: ${scenario}
 ${SCENARIO_GUIDANCE[scenario]}
@@ -910,14 +985,14 @@ ${freeNote ? `\n### הוראה ספציפית מהמשתמש לטיוטה הזו
   return {
     systemPrompt,
     userPrompt,
-    model: MODELS.extract,
+    model: MODELS.draft,
     placeholderMap,
-    exampleCount: examples.length,
+    exampleCount: examples.positive.length,
     contextSnapshot: {
       scenario,
       audience: lead.audience,
       language: lead.language,
-      exampleIds: examples.map((e) => e.id),
+      exampleIds: examples.positive.map((e) => e.id),
       interactionIds: recentInteractions.slice(0, 10).map((i) => i.id),
       freeNote,
     },

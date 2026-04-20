@@ -3,9 +3,11 @@ import {
   uuid,
   text,
   integer,
+  real,
   timestamp,
   pgEnum,
   index,
+  uniqueIndex,
   boolean,
   jsonb,
   vector,
@@ -187,11 +189,43 @@ export const voiceExamples = pgTable(
     contextSnapshot: jsonb(),
     embedding: vector({ dimensions: 1536 }),
     embeddedAt: timestamp({ withTimezone: true }),
+    /**
+     * "manual" — איציק אישר טיוטה דרך הצ'אט/הטופס.
+     * "auto_outcome" — נוצר אוטומטית ע״י קרון הלמידה מתוך שיחה אמיתית.
+     */
+    source: text().notNull().default("manual"),
+    /**
+     * Score in range [-1, +1]. Positive = effective message (preceded warming
+     * or won lead); negative = ineffective (preceded cooling or genuine loss).
+     * 0 = neutral / unknown. Manual examples default to 0.5.
+     */
+    score: real().notNull().default(0.5),
+    /**
+     * Finer-grained tag than the enum scenario, free-text from the learning
+     * cron (e.g. "kashrut_question", "price_anchor", "date_negotiation").
+     * Used for richer scenario matching during retrieval.
+     */
+    scenarioTag: text(),
+    /**
+     * Raw signals from the learning cron — { warmedAfter, cooledAfter,
+     * becameBooked, becameLost, lostReason, daysToOutcome }. Kept for
+     * inspection/debugging and re-scoring without re-mining.
+     */
+    outcomeSignals: jsonb(),
+    /**
+     * Hash of (leadId + original message content) — used by the learning cron
+     * to dedupe re-runs. NULL for manual examples.
+     */
+    messageHash: text(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("voice_examples_match_idx").on(t.audience, t.scenario, t.language),
     index("voice_examples_created_idx").on(t.createdAt),
+    index("voice_examples_score_idx").on(t.score),
+    uniqueIndex("voice_examples_message_hash_idx")
+      .on(t.messageHash)
+      .where(sql`${t.messageHash} is not null`),
     index("voice_examples_embedding_idx")
       .using("hnsw", t.embedding.op("vector_cosine_ops")),
   ]
