@@ -97,7 +97,7 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
     const r = await transcribeAudio(
       new Uint8Array(audio.data),
       audio.mimeType,
-      { language: "he", leadId: lead.id }
+      { language: "he", leadId: lead.id, context: "phone_call" }
     );
     transcript = r.transcript;
   } catch (e) {

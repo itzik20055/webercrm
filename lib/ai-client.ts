@@ -27,8 +27,14 @@ export const MODELS = {
    * extraction or customer-facing drafts (see comment on `extract`).
    */
   fast: "anthropic/claude-haiku-4-5",
-  /** Multimodal — accepts audio file input for transcription. */
-  transcribe: "google/gemini-2.5-flash",
+  /**
+   * Multimodal — accepts audio file input for transcription. Pro (not Flash)
+   * because phone calls and voice messages benefit heavily from the larger
+   * model: fewer word errors, better handling of Hebrew/Yiddish proper nouns
+   * (rabbi names, cities), and it follows diarization instructions ("מוכר:"
+   * vs "לקוח:") that Flash tends to ignore.
+   */
+  transcribe: "google/gemini-2.5-pro",
 } as const;
 
 /**
@@ -291,19 +297,52 @@ async function retrieveVoiceExamplesByAudience(
 export async function transcribeAudio(
   audio: Uint8Array,
   mediaType: string,
-  opts: { language?: "he" | "en" | "yi"; leadId?: string } = {}
+  opts: {
+    language?: "he" | "en" | "yi";
+    leadId?: string;
+    /**
+     * "voice_message" — single speaker (default, used for WhatsApp voice notes).
+     * "phone_call" — two-speaker conversation; model is asked to label each
+     * turn as "מוכר:" or "לקוח:" and clean minor disfluencies.
+     */
+    context?: "voice_message" | "phone_call";
+  } = {}
 ): Promise<{ transcript: string; durationMs: number }> {
   ensureGatewayKey();
   const start = Date.now();
 
   const langHint =
     opts.language === "he"
-      ? "The audio is most likely in Hebrew."
+      ? "The audio is in Hebrew (Israeli, likely with religious/Haredi vocabulary — rabbi names, Hebrew calendar dates, Yiddish loanwords)."
       : opts.language === "yi"
-        ? "The audio is most likely in Yiddish."
+        ? "The audio is in Yiddish (Hebrew letters, German/Slavic vocabulary)."
         : opts.language === "en"
-          ? "The audio is most likely in English."
+          ? "The audio is in English."
           : "The audio may be in Hebrew, English, or Yiddish.";
+
+  const promptText =
+    opts.context === "phone_call"
+      ? `This is a recording of a phone call between two people:
+- A salesperson for Weber Tours (a kosher vacation company in the Austrian Alps, St. Anton)
+- A customer (a prospective Haredi/Orthodox Jewish guest)
+
+${langHint}
+
+Transcribe the conversation verbatim. Critical rules:
+1. Label EVERY turn with "מוכר:" (salesperson) or "לקוח:" (customer) on its own line. Use context clues — the salesperson talks about hotels, rooms, prices, rabbi lecturers; the customer asks questions, mentions their past visit, or raises concerns.
+2. Preserve Hebrew spelling accurately. Pay special attention to:
+   - Rabbi names (הרב אליעזר שטפנסקי, שמולי אונגר, יצחק שולמאן, צ'ולי אונגר)
+   - Hebrew calendar (ט"ו תמוז, ט' באב, תשעה באב)
+   - Cities/airports in Europe (אינסברוק, מינכן, זלצבורג, סנט אנטון, טירול)
+   - Brand/product names (ג'מטריקס, Gemtrix — a travel brand)
+   - Airlines (אל על, ארקיע, Swiss)
+3. Preserve actual numbers exactly as spoken (prices in €/₪, dates, flight numbers). If a number is unclear, write "[?]" rather than guess.
+4. Mark truly unintelligible sections with "[לא ברור]" — do NOT fabricate words to fill gaps.
+5. Keep meaningful repetition (the customer saying "מה אתה אומר?" twice because of connection issues) but you may consolidate clear stuttering within a single word.
+6. Output ONLY the transcript with speaker labels. No preamble, no summary, no timestamps.`
+      : `Transcribe this audio message verbatim, preserving the original language and spelling. ${langHint}
+
+Return ONLY the transcript text. No preamble, no explanation, no speaker labels.`;
 
   let transcript = "";
   let error: string | undefined;
@@ -314,15 +353,8 @@ export async function transcribeAudio(
         {
           role: "user",
           content: [
-            {
-              type: "text",
-              text: `Transcribe this audio message verbatim, preserving the original language. ${langHint}\n\nReturn ONLY the transcript text. No preamble, no explanation, no formatting.`,
-            },
-            {
-              type: "file",
-              data: audio,
-              mediaType,
-            },
+            { type: "text", text: promptText },
+            { type: "file", data: audio, mediaType },
           ],
         },
       ],
