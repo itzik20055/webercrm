@@ -50,8 +50,7 @@ export async function fetchPendingCallRecordings(
   try {
     const uids = await client.search({
       subject: "Call Recording",
-      seen: false,
-      keyword: { not: PROCESSED_LABEL },
+      not: { keyword: PROCESSED_LABEL },
     } as never);
     if (!uids || uids.length === 0) return [];
 
