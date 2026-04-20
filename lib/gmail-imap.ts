@@ -1,9 +1,12 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
+import { eq } from "drizzle-orm";
+import { db, appSettings } from "@/db";
 
-const PROCESSED_LABEL = "weber-processed";
 const SENDER = "donotreply@aloha.global";
 const LOOKBACK_DAYS = 7;
+const PROCESSED_KEY = "call_recordings_processed_uids";
+const MAX_TRACKED_UIDS = 500;
 
 export interface CallRecordingMail {
   uid: number;
@@ -39,28 +42,70 @@ async function openClient(): Promise<ImapFlow> {
   return client;
 }
 
+async function loadProcessedUids(): Promise<Set<number>> {
+  const [row] = await db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, PROCESSED_KEY));
+  if (!row?.value) return new Set();
+  try {
+    const arr = JSON.parse(row.value) as number[];
+    return new Set(arr.filter((n) => typeof n === "number"));
+  } catch {
+    return new Set();
+  }
+}
+
+async function saveProcessedUids(uids: Set<number>): Promise<void> {
+  // Trim to most-recent N to keep the row bounded.
+  const arr = Array.from(uids).sort((a, b) => b - a).slice(0, MAX_TRACKED_UIDS);
+  const value = JSON.stringify(arr);
+  await db
+    .insert(appSettings)
+    .values({ key: PROCESSED_KEY, value, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value, updatedAt: new Date() },
+    });
+}
+
 /**
- * Pulls unprocessed Call Recording emails from Free Telecom (or any sender
- * matching the subject prefix). "Unprocessed" = lacking the weber-processed
- * Gmail label, which we add after handling. Returns at most `limit` mails to
- * keep cron runs bounded.
+ * Pulls unprocessed Call Recording emails from Free Telecom. "Unprocessed" =
+ * UID not in the app_settings.call_recordings_processed_uids set. We use the
+ * DB instead of Gmail labels because Gmail's label/keyword semantics over
+ * IMAP are inconsistent and hard to verify.
  */
 export async function fetchPendingCallRecordings(
   limit = 5
 ): Promise<CallRecordingMail[]> {
+  const processed = await loadProcessedUids();
+  console.log("[gmail-imap] loaded", processed.size, "previously processed UIDs");
+
   const client = await openClient();
   try {
     const since = new Date();
     since.setDate(since.getDate() - LOOKBACK_DAYS);
-    const uids = await client.search({
+
+    const uids = (await client.search({
       from: SENDER,
       subject: "Call Recording",
       since,
-      not: { keyword: PROCESSED_LABEL },
-    } as never);
+    } as never)) as number[] | null;
+    console.log(
+      "[gmail-imap] IMAP search returned",
+      uids?.length ?? 0,
+      "uids matching from/subject/since"
+    );
+
     if (!uids || uids.length === 0) return [];
 
-    const take = uids.slice(-limit);
+    const pending = uids.filter((u) => !processed.has(u));
+    console.log("[gmail-imap]", pending.length, "are unprocessed (excluded", uids.length - pending.length, "already-handled)");
+
+    if (pending.length === 0) return [];
+
+    const take = pending.slice(-limit);
+    console.log("[gmail-imap] fetching UIDs:", take);
     const results: CallRecordingMail[] = [];
 
     for await (const msg of client.fetch(take, {
@@ -71,7 +116,11 @@ export async function fetchPendingCallRecordings(
       try {
         const parsed: ParsedMail = await simpleParser(msg.source as Buffer);
         const attachments = (parsed.attachments ?? [])
-          .filter((a) => a.contentType.startsWith("audio/") || /\.mp3$|\.m4a$|\.wav$/i.test(a.filename ?? ""))
+          .filter(
+            (a) =>
+              a.contentType.startsWith("audio/") ||
+              /\.mp3$|\.m4a$|\.wav$/i.test(a.filename ?? "")
+          )
           .map((a) => ({
             filename: a.filename ?? `audio-${Date.now()}.mp3`,
             mimeType: a.contentType || "audio/mpeg",
@@ -84,7 +133,8 @@ export async function fetchPendingCallRecordings(
           date: parsed.date ?? new Date(),
           from:
             parsed.from?.value?.[0]?.address ??
-            (typeof parsed.from === "string" ? parsed.from : "") ?? "",
+            (typeof parsed.from === "string" ? parsed.from : "") ??
+            "",
           bodyText: parsed.text ?? "",
           attachments,
         });
@@ -104,20 +154,13 @@ export async function fetchPendingCallRecordings(
 }
 
 /**
- * Marks the given UIDs as processed by adding our private Gmail label. Gmail
- * exposes labels through IMAP keywords (X-GM-LABELS), and ImapFlow handles
- * label creation on the fly when you add an unknown keyword.
+ * Records the given UIDs in the DB so future cron runs skip them. Trim the
+ * stored list to the most recent N UIDs so the row stays small.
  */
 export async function markProcessed(uids: number[]): Promise<void> {
   if (uids.length === 0) return;
-  const client = await openClient();
-  try {
-    await client.messageFlagsAdd(uids, [PROCESSED_LABEL], { uid: true });
-  } finally {
-    try {
-      await client.logout();
-    } catch {
-      /* swallow */
-    }
-  }
+  const existing = await loadProcessedUids();
+  for (const u of uids) existing.add(u);
+  await saveProcessedUids(existing);
+  console.log("[gmail-imap] marked", uids.length, "UIDs processed; total tracked:", existing.size);
 }
