@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ScrollText, Save, Loader2, Check } from "lucide-react";
-import { saveAiRules } from "./actions";
+import { saveAiRules } from "@/lib/ai-rules";
 
 const PLACEHOLDER = `דוגמאות (כתוב חופשי, שורה לכל כלל):
 
@@ -48,7 +48,7 @@ export function RulesEditor({ initialRules }: { initialRules: string }) {
         )}
       </header>
       <p className="text-[11px] text-muted-foreground leading-relaxed">
-        כללים שנכנסים לכל ניסוח של ה-AI (טיוטות לידים + תשובות אימון). שורה אחת לכל כלל. ריק = בלי כללים.
+        כללים שנכנסים לכל ניסוח של ה-AI (טיוטות לידים + תשובות צ'אט). שורה אחת לכל כלל. ריק = בלי כללים.
       </p>
       <textarea
         value={text}

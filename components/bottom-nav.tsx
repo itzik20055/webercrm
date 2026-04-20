@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sparkles, Users, ListChecks, Settings } from "lucide-react";
+import { Sparkles, Users, ListChecks, BookOpen, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -16,6 +16,7 @@ const items: NavItem[] = [
   { href: "/chat", icon: Sparkles, label: "צ'אט" },
   { href: "/leads", icon: Users, label: "לידים" },
   { href: "/queue", icon: ListChecks, label: "תור", badge: true },
+  { href: "/kb", icon: BookOpen, label: "ידע" },
   { href: "/settings", icon: Settings, label: "הגדרות" },
 ];
 
@@ -26,7 +27,7 @@ export function BottomNav({ queueCount = 0 }: { queueCount?: number }) {
       className="fixed bottom-0 inset-x-0 z-30 bg-card/85 backdrop-blur-xl supports-[backdrop-filter]:bg-card/70 border-t border-border/60 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_24px_-8px_rgba(30,58,138,0.08)]"
       aria-label="ניווט ראשי"
     >
-      <ul className="grid grid-cols-4 max-w-lg mx-auto px-2 pt-1.5 pb-1">
+      <ul className="grid grid-cols-5 max-w-lg mx-auto px-2 pt-1.5 pb-1">
         {items.map(({ href, icon: Icon, label, badge }) => {
           const active =
             href === "/chat"

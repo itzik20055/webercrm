@@ -15,6 +15,8 @@ import {
   EyeOff,
 } from "lucide-react";
 import { KbToggle } from "./toggle";
+import { RulesEditor } from "@/components/rules-editor";
+import { getAiRules } from "@/lib/ai-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -41,10 +43,13 @@ const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>
 const CATEGORY_ORDER = ["hotel", "rooms", "food", "activities", "prices", "logistics", "faq"];
 
 export default async function KbPage() {
-  const entries = await db
-    .select()
-    .from(productKb)
-    .orderBy(asc(productKb.category), asc(productKb.title));
+  const [entries, rules] = await Promise.all([
+    db
+      .select()
+      .from(productKb)
+      .orderBy(asc(productKb.category), asc(productKb.title)),
+    getAiRules(),
+  ]);
 
   const grouped = entries.reduce<Record<string, typeof entries>>((acc, e) => {
     (acc[e.category] ??= []).push(e);
@@ -57,13 +62,13 @@ export default async function KbPage() {
         <div className="min-w-0">
           <p className="text-xs font-medium text-muted-foreground tracking-tight flex items-center gap-1.5">
             <BookOpen className="size-3.5" />
-            ספר הידע
+            ידע
           </p>
           <h1 className="text-[26px] font-bold tracking-tight leading-tight">
-            ידע על המוצר
+            כללי כתיבה וידע
           </h1>
           <p className="text-xs text-muted-foreground mt-1">
-            ה-AI ניזון מהידע הזה. עדכן בכל פעם שמשהו משתנה.
+            כללים גלובליים + ידע על המוצר. ה-AI ניזון מכל מה שכאן.
           </p>
         </div>
         <Link
@@ -74,6 +79,8 @@ export default async function KbPage() {
           חדש
         </Link>
       </header>
+
+      <RulesEditor initialRules={rules} />
 
       {entries.length === 0 ? (
         <div className="text-sm text-muted-foreground py-10 px-4 text-center bg-card/60 border border-dashed border-border/80 rounded-2xl">
