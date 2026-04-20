@@ -1,71 +1,34 @@
 import Link from "next/link";
-import { db, leads, followups } from "@/db";
-import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import { db, leads } from "@/db";
+import { sql } from "drizzle-orm";
 import {
   Plus,
-  BellRing,
-  Flame,
-  Sparkles,
   ChevronLeft,
   Phone,
   MessageCircle,
   TrendingUp,
   PartyPopper,
+  Zap,
+  Clock,
+  CalendarDays,
 } from "lucide-react";
 import { StatusBadge } from "@/components/status-badge";
-import { smartDate, telLink, whatsappLink } from "@/lib/format";
+import { telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
+import { computeActionQueue, type Action } from "@/lib/action-queue";
 import { AUDIENCE_LABELS } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
-async function getDashboard() {
-  const now = new Date();
-  const endOfDay = new Date(now);
-  endOfDay.setHours(23, 59, 59, 999);
-  const weekAgo = new Date(now);
-  weekAgo.setDate(weekAgo.getDate() - 7);
-
-  const [todaysFollowups, hot, recent, counts] = await Promise.all([
-    db
-      .select({
-        id: followups.id,
-        leadId: followups.leadId,
-        dueAt: followups.dueAt,
-        reason: followups.reason,
-        leadName: leads.name,
-        leadPhone: leads.phone,
-        leadStatus: leads.status,
-        leadAudience: leads.audience,
-      })
-      .from(followups)
-      .innerJoin(leads, eq(followups.leadId, leads.id))
-      .where(and(isNull(followups.completedAt), lte(followups.dueAt, endOfDay)))
-      .orderBy(asc(followups.dueAt))
-      .limit(20),
-    db
-      .select()
-      .from(leads)
-      .where(and(eq(leads.priority, "hot"), sql`${leads.status} not in ('booked','lost')`))
-      .orderBy(desc(leads.updatedAt))
-      .limit(10),
-    db
-      .select()
-      .from(leads)
-      .where(gte(leads.createdAt, weekAgo))
-      .orderBy(desc(leads.createdAt))
-      .limit(10),
-    db
-      .select({
-        total: sql<number>`count(*)::int`,
-        booked: sql<number>`count(*) filter (where ${leads.status} = 'booked')::int`,
-        active: sql<number>`count(*) filter (where ${leads.status} not in ('booked','lost'))::int`,
-        overdue: sql<number>`count(*) filter (where ${leads.nextFollowupAt} < now() and ${leads.followupCompletedAt} is null)::int`,
-      })
-      .from(leads),
-  ]);
-
-  return { todaysFollowups, hot, recent, counts: counts[0] };
+async function getStats() {
+  const [row] = await db
+    .select({
+      active: sql<number>`count(*) filter (where ${leads.status} not in ('booked','lost'))::int`,
+      hot: sql<number>`count(*) filter (where ${leads.priority} = 'hot' and ${leads.status} not in ('booked','lost'))::int`,
+      booked: sql<number>`count(*) filter (where ${leads.status} = 'booked')::int`,
+    })
+    .from(leads);
+  return row;
 }
 
 const greeting = () => {
@@ -77,10 +40,9 @@ const greeting = () => {
 };
 
 export default async function HomePage() {
-  const { todaysFollowups, hot, recent, counts } = await getDashboard();
-  const overdueCount = todaysFollowups.filter(
-    (f) => new Date(f.dueAt) < new Date()
-  ).length;
+  const [counts, queue] = await Promise.all([getStats(), computeActionQueue()]);
+  const total = queue.now.length + queue.today.length + queue.soon.length;
+  const allEmpty = total === 0;
 
   return (
     <div className="px-4 pt-5 pb-6 space-y-5">
@@ -113,110 +75,45 @@ export default async function HomePage() {
           </div>
           <div className="mt-3 grid grid-cols-3 gap-3">
             <Stat label="פעילים" value={counts.active} />
+            <Stat label="חמים" value={counts.hot} warn={counts.hot > 0} />
             <Stat label="סגורים" value={counts.booked} accent />
-            <Stat label="באיחור" value={counts.overdue} warn={counts.overdue > 0} />
           </div>
         </div>
       </div>
 
-      <Section
-        title="פולואפים להיום"
-        icon={<BellRing className="size-[18px] text-primary" />}
-        href="/followups"
-        badge={
-          todaysFollowups.length > 0
-            ? {
-                text: `${todaysFollowups.length}${overdueCount > 0 ? ` · ${overdueCount} באיחור` : ""}`,
-                tone: overdueCount > 0 ? "destructive" : "default",
-              }
-            : undefined
-        }
-      >
-        {todaysFollowups.length === 0 ? (
-          <EmptyRow icon={<PartyPopper className="size-4" />} text="אין פולואפים להיום" />
-        ) : (
-          todaysFollowups.slice(0, 5).map((f) => {
-            const overdue = new Date(f.dueAt) < new Date();
-            const goodTime = isGoodTimeToCall(f.leadAudience);
-            return (
-              <div
-                key={f.id}
-                className="flex items-start gap-2.5 p-3.5 rounded-2xl bg-card border border-border/70 shadow-soft"
-              >
-                <Link
-                  href={`/leads/${f.leadId}`}
-                  className="min-w-0 flex-1 press"
-                >
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold truncate tracking-tight">
-                      {f.leadName}
-                    </span>
-                    <StatusBadge status={f.leadStatus} />
-                  </div>
-                  {f.reason && (
-                    <p className="text-sm text-muted-foreground mt-1 truncate">
-                      {f.reason}
-                    </p>
-                  )}
-                  <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
-                    <span className={overdue ? "text-destructive font-semibold" : "font-medium"}>
-                      {smartDate(f.dueAt)}
-                    </span>
-                    <span className="opacity-50">·</span>
-                    <span className={goodTime ? "" : "text-amber-600 font-medium"}>
-                      {localTimeLabel(f.leadAudience)} {AUDIENCE_LABELS[f.leadAudience].split(" ")[1]}
-                    </span>
-                  </div>
-                </Link>
-                <div className="flex gap-1.5 shrink-0">
-                  <a
-                    href={telLink(f.leadPhone)}
-                    className="press size-10 rounded-full bg-primary-soft text-primary flex items-center justify-center"
-                    aria-label="חייג"
-                  >
-                    <Phone className="size-[18px]" strokeWidth={2.2} />
-                  </a>
-                  <a
-                    href={whatsappLink(f.leadPhone)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="press size-10 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"
-                    aria-label="וואטסאפ"
-                  >
-                    <MessageCircle className="size-[18px]" strokeWidth={2.2} />
-                  </a>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </Section>
-
-      <Section
-        title="לידים חמים"
-        icon={<Flame className="size-[18px] text-red-500" />}
-        href="/leads?priority=hot"
-      >
-        {hot.length === 0 ? (
-          <EmptyRow text="אין לידים מסומנים כחמים" />
-        ) : (
-          hot.slice(0, 4).map((l) => (
-            <LeadRow key={l.id} lead={l} />
-          ))
-        )}
-      </Section>
-
-      <Section
-        title="חדשים השבוע"
-        icon={<Sparkles className="size-[18px] text-blue-500" />}
-        href="/leads"
-      >
-        {recent.length === 0 ? (
-          <EmptyRow text="עדיין לא נכנסו לידים — הוסף את הראשון" />
-        ) : (
-          recent.slice(0, 4).map((l) => <LeadRow key={l.id} lead={l} />)
-        )}
-      </Section>
+      {allEmpty ? (
+        <EmptyAll />
+      ) : (
+        <>
+          {queue.now.length > 0 && (
+            <ActionSection
+              title="עכשיו"
+              icon={<Zap className="size-[18px] text-destructive" strokeWidth={2.4} />}
+              count={queue.now.length}
+              tone="now"
+              actions={queue.now}
+            />
+          )}
+          {queue.today.length > 0 && (
+            <ActionSection
+              title="היום"
+              icon={<Clock className="size-[18px] text-amber-500" strokeWidth={2.2} />}
+              count={queue.today.length}
+              tone="today"
+              actions={queue.today}
+            />
+          )}
+          {queue.soon.length > 0 && (
+            <ActionSection
+              title="בקרוב"
+              icon={<CalendarDays className="size-[18px] text-muted-foreground" strokeWidth={2.2} />}
+              count={queue.soon.length}
+              tone="soon"
+              actions={queue.soon}
+            />
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -249,78 +146,152 @@ function Stat({
   );
 }
 
-function Section({
+function ActionSection({
   title,
   icon,
-  href,
-  badge,
-  children,
+  count,
+  tone,
+  actions,
 }: {
   title: string;
-  icon?: React.ReactNode;
-  href?: string;
-  badge?: { text: string; tone: "default" | "destructive" };
-  children: React.ReactNode;
+  icon: React.ReactNode;
+  count: number;
+  tone: "now" | "today" | "soon";
+  actions: Action[];
 }) {
+  const badgeClass =
+    tone === "now"
+      ? "bg-destructive/12 text-destructive"
+      : tone === "today"
+      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+      : "bg-secondary text-secondary-foreground";
+
   return (
     <section className="space-y-2.5">
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
           {icon}
           <h2 className="font-bold tracking-tight">{title}</h2>
-          {badge && (
-            <span
-              className={
-                "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold " +
-                (badge.tone === "destructive"
-                  ? "bg-destructive/12 text-destructive"
-                  : "bg-secondary text-secondary-foreground")
-              }
-            >
-              {badge.text}
-            </span>
-          )}
-        </div>
-        {href && (
-          <Link
-            href={href}
-            className="press text-xs font-semibold text-muted-foreground flex items-center"
+          <span
+            className={
+              "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums " +
+              badgeClass
+            }
           >
-            הכל
+            {count}
+          </span>
+        </div>
+      </div>
+      <div className="space-y-2">
+        {actions.slice(0, 8).map((a) => (
+          <ActionCard key={a.key} action={a} tone={tone} />
+        ))}
+        {actions.length > 8 && (
+          <Link
+            href={tone === "now" || tone === "today" ? "/followups" : "/leads"}
+            className="press flex items-center justify-center gap-1 py-3 text-xs font-semibold text-muted-foreground"
+          >
+            עוד {actions.length - 8} פעולות
             <ChevronLeft className="size-3.5" />
           </Link>
         )}
       </div>
-      <div className="space-y-2">{children}</div>
     </section>
   );
 }
 
-function EmptyRow({ text, icon }: { text: string; icon?: React.ReactNode }) {
+function ActionCard({
+  action,
+  tone,
+}: {
+  action: Action;
+  tone: "now" | "today" | "soon";
+}) {
+  const goodTime = isGoodTimeToCall(action.leadAudience);
+  const audienceShort = AUDIENCE_LABELS[action.leadAudience].split(" ")[1];
+  const isOverdue = action.kind === "overdue_followup";
+
+  const cardClass =
+    tone === "now"
+      ? "bg-destructive/[0.04] border-destructive/25"
+      : tone === "today"
+      ? "bg-card border-amber-500/20"
+      : "bg-card border-border/70";
+
   return (
-    <div className="text-sm text-muted-foreground py-5 px-3 text-center bg-card/60 border border-dashed border-border/80 rounded-2xl flex items-center justify-center gap-2">
-      {icon}
-      {text}
+    <div
+      className={
+        "flex items-start gap-2.5 p-3.5 rounded-2xl border shadow-soft " +
+        cardClass
+      }
+    >
+      <Link href={`/leads/${action.leadId}`} className="press min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-semibold truncate tracking-tight">
+            {action.leadName}
+          </span>
+          <StatusBadge status={action.leadStatus} />
+        </div>
+        <p className="text-sm font-medium mt-1 truncate">{action.reason}</p>
+        <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+          {action.detail && (
+            <>
+              <span
+                className={
+                  isOverdue
+                    ? "text-destructive font-semibold"
+                    : tone === "now"
+                    ? "font-semibold"
+                    : "font-medium"
+                }
+              >
+                {action.detail}
+              </span>
+              <span className="opacity-50">·</span>
+            </>
+          )}
+          <span className={goodTime ? "" : "text-amber-600 font-medium"}>
+            {localTimeLabel(action.leadAudience)} {audienceShort}
+          </span>
+        </div>
+      </Link>
+      <div className="flex gap-1.5 shrink-0">
+        <a
+          href={telLink(action.leadPhone)}
+          className="press size-10 rounded-full bg-primary-soft text-primary flex items-center justify-center"
+          aria-label="חייג"
+        >
+          <Phone className="size-[18px]" strokeWidth={2.2} />
+        </a>
+        <a
+          href={whatsappLink(action.leadPhone)}
+          target="_blank"
+          rel="noreferrer"
+          className="press size-10 rounded-full bg-emerald-500/12 text-emerald-600 dark:text-emerald-400 flex items-center justify-center"
+          aria-label="וואטסאפ"
+        >
+          <MessageCircle className="size-[18px]" strokeWidth={2.2} />
+        </a>
+      </div>
     </div>
   );
 }
 
-function LeadRow({ lead }: { lead: typeof leads.$inferSelect }) {
+function EmptyAll() {
   return (
-    <Link
-      href={`/leads/${lead.id}`}
-      className="press flex items-center justify-between p-3.5 rounded-2xl bg-card border border-border/70 shadow-soft"
-    >
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold truncate tracking-tight">{lead.name}</span>
-          <StatusBadge status={lead.status} />
-        </div>
-        <div className="text-xs text-muted-foreground mt-1 tabular-nums">
-          {smartDate(lead.updatedAt)} · {lead.phone}
-        </div>
-      </div>
-      <ChevronLeft className="size-4 text-muted-foreground shrink-0" />
-    </Link>
+    <div className="rounded-2xl bg-card border border-dashed border-border/70 p-6 text-center space-y-2">
+      <PartyPopper className="size-8 text-emerald-500 mx-auto" strokeWidth={1.8} />
+      <p className="font-semibold tracking-tight">הרשימה ריקה</p>
+      <p className="text-sm text-muted-foreground">
+        אין פעולות דחופות — נצל את הזמן לחיפוש לידים חדשים
+      </p>
+      <Link
+        href="/leads/new"
+        className="press inline-flex items-center gap-1.5 mt-2 h-10 px-4 rounded-full bg-primary text-primary-foreground text-sm font-semibold"
+      >
+        <Plus className="size-4" strokeWidth={2.4} />
+        הוסף ליד
+      </Link>
+    </div>
   );
 }
