@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -10,8 +10,9 @@ import {
   MessageCircle,
   Send,
   Loader2,
+  StopCircle,
 } from "lucide-react";
-import { generateDraft, saveVoiceExample } from "@/app/(app)/leads/draft-actions";
+import { saveVoiceExample } from "@/app/(app)/leads/draft-actions";
 import { whatsappLink } from "@/lib/format";
 import { DRAFT_SCENARIO_LABELS } from "@/db/schema";
 import type { DraftScenario } from "@/lib/ai-client";
@@ -32,8 +33,27 @@ type DraftState = {
   finalText: string;
   contextSnapshot: Record<string, unknown>;
   exampleCount: number;
-  reasoning: string;
 };
+
+function decodeContextHeader(value: string | null): {
+  contextSnapshot: Record<string, unknown>;
+  exampleCount: number;
+} {
+  if (!value) return { contextSnapshot: {}, exampleCount: 0 };
+  try {
+    const json = atob(value);
+    const parsed = JSON.parse(json) as {
+      contextSnapshot: Record<string, unknown>;
+      exampleCount: number;
+    };
+    return {
+      contextSnapshot: parsed.contextSnapshot ?? {},
+      exampleCount: parsed.exampleCount ?? 0,
+    };
+  } catch {
+    return { contextSnapshot: {}, exampleCount: 0 };
+  }
+}
 
 export function DraftCard({
   leadId,
@@ -45,35 +65,82 @@ export function DraftCard({
   const [scenario, setScenario] = useState<DraftScenario>("first_reply");
   const [freeNote, setFreeNote] = useState("");
   const [draft, setDraft] = useState<DraftState | null>(null);
+  const [streaming, setStreaming] = useState(false);
   const [copied, setCopied] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
-  const [generating, startGenerate] = useTransition();
   const [saving, startSave] = useTransition();
+  const abortRef = useRef<AbortController | null>(null);
 
   const dirty = draft != null && draft.finalText.trim() !== draft.aiDraft.trim();
 
-  function generate() {
-    startGenerate(async () => {
-      const res = await generateDraft({
-        leadId,
-        scenario,
-        freeNote: freeNote.trim() || undefined,
+  async function generate() {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setStreaming(true);
+    setSavedId(null);
+    setCopied(false);
+    setDraft({
+      scenario,
+      aiDraft: "",
+      finalText: "",
+      contextSnapshot: {},
+      exampleCount: 0,
+    });
+
+    try {
+      const res = await fetch("/api/ai/draft/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId,
+          scenario,
+          freeNote: freeNote.trim() || undefined,
+        }),
+        signal: controller.signal,
       });
-      if (!res.ok) {
-        toast.error(res.error || "ניסוח נכשל");
+
+      if (!res.ok || !res.body) {
+        const msg = await res.text().catch(() => "");
+        toast.error(msg || "ניסוח נכשל");
+        setDraft(null);
         return;
       }
-      setDraft({
-        scenario,
-        aiDraft: res.draft,
-        finalText: res.draft,
-        contextSnapshot: res.contextSnapshot,
-        exampleCount: res.exampleCount,
-        reasoning: res.reasoning,
-      });
-      setSavedId(null);
-      setCopied(false);
-    });
+
+      const ctx = decodeContextHeader(res.headers.get("X-Draft-Context"));
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let acc = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        acc += value;
+        setDraft((prev) =>
+          prev
+            ? {
+                ...prev,
+                aiDraft: acc,
+                finalText: acc,
+                contextSnapshot: ctx.contextSnapshot,
+                exampleCount: ctx.exampleCount,
+              }
+            : prev
+        );
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      toast.error(e instanceof Error ? e.message : "ניסוח נכשל");
+      setDraft(null);
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }
+
+  function stop() {
+    abortRef.current?.abort();
   }
 
   async function copy() {
@@ -118,7 +185,7 @@ export function DraftCard({
           <Sparkles className="size-4" />
           טיוטת תשובה
         </h2>
-        {draft && (
+        {draft && draft.exampleCount > 0 && (
           <span className="text-[10px] font-medium text-muted-foreground tabular-nums">
             {draft.exampleCount} דוגמאות
           </span>
@@ -153,42 +220,48 @@ export function DraftCard({
         className="w-full text-sm rounded-xl border border-border bg-background p-2.5 min-h-[60px] resize-none placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/30"
       />
 
-      <button
-        type="button"
-        disabled={generating}
-        onClick={generate}
-        className="press w-full h-11 rounded-xl bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
-      >
-        {generating ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
+      {streaming ? (
+        <button
+          type="button"
+          onClick={stop}
+          className="press w-full h-11 rounded-xl bg-secondary text-secondary-foreground font-semibold flex items-center justify-center gap-2"
+        >
+          <StopCircle className="size-4" />
+          עצור
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={generate}
+          className="press w-full h-11 rounded-xl bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2"
+        >
           <Wand2 className="size-4" />
-        )}
-        {draft ? "ניסוח חדש" : "צור טיוטה"}
-      </button>
+          {draft ? "ניסוח חדש" : "צור טיוטה"}
+        </button>
+      )}
 
       {draft && (
         <div className="space-y-2.5">
-          <textarea
-            value={draft.finalText}
-            onChange={(e) =>
-              setDraft({ ...draft, finalText: e.target.value })
-            }
-            className="w-full text-sm rounded-xl border border-border bg-background p-3 min-h-[160px] resize-y focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed"
-            dir="auto"
-          />
-
-          {draft.reasoning && (
-            <p className="text-[11px] text-muted-foreground italic px-1">
-              {draft.reasoning}
-            </p>
-          )}
+          <div className="relative">
+            <textarea
+              value={draft.finalText}
+              onChange={(e) =>
+                setDraft({ ...draft, finalText: e.target.value })
+              }
+              className="w-full text-sm rounded-xl border border-border bg-background p-3 min-h-[160px] resize-y focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed"
+              dir="auto"
+            />
+            {streaming && (
+              <Loader2 className="size-3.5 animate-spin absolute top-2.5 left-2.5 text-muted-foreground" />
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              disabled={streaming || !draft.finalText.trim()}
               onClick={copy}
-              className="press h-10 rounded-xl bg-secondary text-secondary-foreground text-sm font-semibold flex items-center justify-center gap-1.5"
+              className="press h-10 rounded-xl bg-secondary text-secondary-foreground text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
               {copied ? "הועתק" : "העתק"}
@@ -197,7 +270,11 @@ export function DraftCard({
               href={whatsappLink(leadPhone, draft.finalText)}
               target="_blank"
               rel="noreferrer"
-              className="press h-10 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-sm font-semibold flex items-center justify-center gap-1.5"
+              aria-disabled={streaming || !draft.finalText.trim()}
+              className={
+                "press h-10 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-sm font-semibold flex items-center justify-center gap-1.5 " +
+                (streaming || !draft.finalText.trim() ? "pointer-events-none opacity-50" : "")
+              }
             >
               <MessageCircle className="size-4" />
               שלח בוואטסאפ
@@ -206,10 +283,10 @@ export function DraftCard({
 
           <button
             type="button"
-            disabled={saving || !!savedId}
+            disabled={streaming || saving || !!savedId || !draft.finalText.trim()}
             onClick={save}
             className={
-              "press w-full h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 border transition " +
+              "press w-full h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 border transition disabled:opacity-50 " +
               (savedId
                 ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
                 : dirty

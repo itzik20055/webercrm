@@ -5,6 +5,7 @@ import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { db, productKb, appSettings } from "@/db";
 import { answerCustomerQuestion, invalidateAiRulesCache } from "@/lib/ai-client";
+import { embedOne } from "@/lib/embeddings";
 
 const AI_RULES_KEY = "ai_writing_rules";
 
@@ -78,6 +79,13 @@ export async function saveAsFaq(input: {
     const title = parsed.question.replace(/\s+/g, " ").trim().slice(0, 120);
     const content = `ש: ${parsed.question.trim()}\n\nת: ${parsed.answer.trim()}`;
 
+    let embedding: number[] | null = null;
+    try {
+      embedding = await embedOne(`[faq] ${title}\n\n${content}`);
+    } catch {
+      embedding = null;
+    }
+
     const [created] = await db
       .insert(productKb)
       .values({
@@ -86,6 +94,8 @@ export async function saveAsFaq(input: {
         title,
         content,
         active: true,
+        embedding: embedding ?? undefined,
+        embeddedAt: embedding ? new Date() : undefined,
       })
       .returning({ id: productKb.id });
 

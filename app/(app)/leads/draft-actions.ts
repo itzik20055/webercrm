@@ -5,6 +5,7 @@ import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { db, leads, interactions, voiceExamples } from "@/db";
 import { draftReply, type DraftScenario } from "@/lib/ai-client";
+import { embedOne } from "@/lib/embeddings";
 
 const SCENARIOS = [
   "first_reply",
@@ -26,7 +27,6 @@ export type GenerateDraftResult =
   | {
       ok: true;
       draft: string;
-      reasoning: string;
       exampleCount: number;
       contextSnapshot: Record<string, unknown>;
       durationMs: number;
@@ -60,9 +60,8 @@ export async function generateDraft(input: {
     return {
       ok: true,
       draft: result.draft,
-      reasoning: result.reasoning,
       exampleCount: result.exampleCount,
-      contextSnapshot: result.contextSnapshot,
+      contextSnapshot: result.contextSnapshot as unknown as Record<string, unknown>,
       durationMs: result.durationMs,
     };
   } catch (e) {
@@ -96,6 +95,13 @@ export async function saveVoiceExample(input: {
       .where(eq(leads.id, parsed.leadId));
     if (!lead) return { ok: false, error: "ליד לא נמצא" };
 
+    let embedding: number[] | null = null;
+    try {
+      embedding = await embedOne(`[${parsed.scenario}] ${parsed.finalText}`);
+    } catch {
+      embedding = null;
+    }
+
     const [created] = await db
       .insert(voiceExamples)
       .values({
@@ -106,6 +112,8 @@ export async function saveVoiceExample(input: {
         aiDraft: parsed.aiDraft,
         finalText: parsed.finalText,
         contextSnapshot: parsed.contextSnapshot ?? null,
+        embedding: embedding ?? undefined,
+        embeddedAt: embedding ? new Date() : undefined,
       })
       .returning({ id: voiceExamples.id });
 

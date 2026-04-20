@@ -5,6 +5,15 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db, productKb } from "@/db";
+import { embedOne } from "@/lib/embeddings";
+
+async function tryEmbedKb(category: string, title: string, content: string) {
+  try {
+    return await embedOne(`[${category}] ${title}\n\n${content}`);
+  } catch {
+    return null;
+  }
+}
 
 const KB_CATEGORIES = [
   "hotel",
@@ -33,12 +42,15 @@ export async function createKbEntry(formData: FormData) {
     active: formData.get("active") === "on" || formData.get("active") === "true",
   });
 
+  const embedding = await tryEmbedKb(parsed.category, parsed.title, parsed.content);
   await db.insert(productKb).values({
     category: parsed.category,
     language: parsed.language,
     title: parsed.title,
     content: parsed.content,
     active: parsed.active,
+    embedding: embedding ?? undefined,
+    embeddedAt: embedding ? new Date() : undefined,
   });
 
   revalidatePath("/kb");
@@ -64,6 +76,7 @@ export async function updateKbEntry(formData: FormData) {
     active: formData.get("active") === "on" || formData.get("active") === "true",
   });
 
+  const embedding = await tryEmbedKb(parsed.category, parsed.title, parsed.content);
   await db
     .update(productKb)
     .set({
@@ -73,6 +86,8 @@ export async function updateKbEntry(formData: FormData) {
       content: parsed.content,
       active: parsed.active,
       updatedAt: new Date(),
+      embedding: embedding ?? undefined,
+      embeddedAt: embedding ? new Date() : undefined,
     })
     .where(eq(productKb.id, parsed.id));
 

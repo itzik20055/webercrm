@@ -1,6 +1,6 @@
 import { generateObject, generateText } from "ai";
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, cosineDistance, desc, eq, isNotNull } from "drizzle-orm";
 import {
   db,
   aiAuditLog,
@@ -11,6 +11,7 @@ import {
   type Interaction,
 } from "@/db";
 import { anonymize, deanonymize } from "./anonymize";
+import { embedOne } from "./embeddings";
 
 /** Models we use through Vercel AI Gateway. */
 export const MODELS = {
@@ -20,9 +21,42 @@ export const MODELS = {
    * after seeing garbled output on real chats.
    */
   extract: "anthropic/claude-sonnet-4.6",
+  /**
+   * Cheap & fast. For routing, classification, knowledge-gap detection — tasks
+   * where structure matters more than language nuance. Do NOT use for chat
+   * extraction or customer-facing drafts (see comment on `extract`).
+   */
+  fast: "anthropic/claude-haiku-4-5",
   /** Multimodal — accepts audio file input for transcription. */
   transcribe: "google/gemini-2.5-flash",
 } as const;
+
+/**
+ * Returns a TransformStream that replaces anonymization placeholders ([NAME],
+ * [PHONE_1], etc.) with their original values as a stream of text deltas
+ * arrives. Buffers any dangling `[…` so that placeholders split across deltas
+ * are still replaced correctly. Flush at end emits anything still buffered.
+ */
+export function createDeanonymizeStream(
+  placeholderMap: Record<string, string>
+): TransformStream<string, string> {
+  let buffer = "";
+  return new TransformStream<string, string>({
+    transform(chunk, controller) {
+      buffer += chunk;
+      const lastOpen = buffer.lastIndexOf("[");
+      const lastClose = buffer.lastIndexOf("]");
+      // If we have an unclosed `[`, hold from there — placeholder may complete next chunk.
+      const safeUpTo = lastOpen > lastClose ? lastOpen : buffer.length;
+      const safe = buffer.slice(0, safeUpTo);
+      buffer = buffer.slice(safeUpTo);
+      if (safe) controller.enqueue(deanonymize(safe, placeholderMap));
+    },
+    flush(controller) {
+      if (buffer) controller.enqueue(deanonymize(buffer, placeholderMap));
+    },
+  });
+}
 
 function ensureGatewayKey() {
   if (!process.env.AI_GATEWAY_API_KEY) {
@@ -102,23 +136,150 @@ async function loadKnowledgeContext(): Promise<string> {
       kbCache = { text: "", loadedAt: now };
       return "";
     }
-    const grouped = new Map<string, string[]>();
-    for (const r of rows) {
-      const arr = grouped.get(r.category) ?? [];
-      arr.push(`### ${r.title}\n${r.content}`);
-      grouped.set(r.category, arr);
-    }
-    const sections: string[] = [];
-    for (const [cat, items] of grouped) {
-      const label = KB_CATEGORY_LABELS[cat] ?? cat;
-      sections.push(`## ${label}\n\n${items.join("\n\n")}`);
-    }
-    const text = sections.join("\n\n");
+    const text = formatKbRows(rows);
     kbCache = { text, loadedAt: now };
     return text;
   } catch {
     return "";
   }
+}
+
+function formatKbRows(
+  rows: { category: string; title: string; content: string }[]
+): string {
+  const grouped = new Map<string, string[]>();
+  for (const r of rows) {
+    const arr = grouped.get(r.category) ?? [];
+    arr.push(`### ${r.title}\n${r.content}`);
+    grouped.set(r.category, arr);
+  }
+  const sections: string[] = [];
+  for (const [cat, items] of grouped) {
+    const label = KB_CATEGORY_LABELS[cat] ?? cat;
+    sections.push(`## ${label}\n\n${items.join("\n\n")}`);
+  }
+  return sections.join("\n\n");
+}
+
+/**
+ * RAG: retrieve top-K KB entries by cosine similarity to the query.
+ * Falls back to the full knowledge base if embedding lookup fails or returns
+ * nothing — knowledge is augmentation, never a hard dependency. Cosine
+ * distance < 0.65 (≈ 0.35 similarity) is treated as "relevant enough".
+ */
+async function retrieveKnowledgeForQuery(
+  query: string,
+  topK = 8,
+  maxDistance = 0.65
+): Promise<string> {
+  if (!query.trim()) return loadKnowledgeContext();
+  try {
+    const queryEmbedding = await embedOne(query);
+    const distance = cosineDistance(productKb.embedding, queryEmbedding);
+    const rows = await db
+      .select({
+        category: productKb.category,
+        title: productKb.title,
+        content: productKb.content,
+        distance,
+      })
+      .from(productKb)
+      .where(
+        and(eq(productKb.active, true), isNotNull(productKb.embedding))
+      )
+      .orderBy(distance)
+      .limit(topK);
+    const filtered = rows.filter((r) => Number(r.distance) <= maxDistance);
+    if (filtered.length === 0) return loadKnowledgeContext();
+    return formatKbRows(filtered);
+  } catch {
+    return loadKnowledgeContext();
+  }
+}
+
+/**
+ * RAG: retrieve top-K voice examples for a scenario+audience+language scope,
+ * ranked by similarity to the query (lead profile + free note). Without a
+ * meaningful query, falls back to plain recency. The strict scope filter
+ * stays in place — we never want a Hebrew example bleeding into an English
+ * draft.
+ */
+async function retrieveVoiceExamples(args: {
+  scenario: string;
+  audience: Lead["audience"];
+  language: Lead["language"];
+  query: string;
+  limit?: number;
+}): Promise<{ id: string; finalText: string }[]> {
+  const limit = args.limit ?? 5;
+  const baseFilter = and(
+    eq(voiceExamples.scenario, args.scenario as never),
+    eq(voiceExamples.audience, args.audience),
+    eq(voiceExamples.language, args.language)
+  );
+
+  if (args.query.trim()) {
+    try {
+      const queryEmbedding = await embedOne(args.query);
+      const distance = cosineDistance(voiceExamples.embedding, queryEmbedding);
+      const rows = await db
+        .select({ id: voiceExamples.id, finalText: voiceExamples.finalText })
+        .from(voiceExamples)
+        .where(and(baseFilter, isNotNull(voiceExamples.embedding)))
+        .orderBy(distance)
+        .limit(limit);
+      if (rows.length > 0) return rows;
+    } catch {
+      // fall through to recency
+    }
+  }
+
+  return db
+    .select({ id: voiceExamples.id, finalText: voiceExamples.finalText })
+    .from(voiceExamples)
+    .where(baseFilter)
+    .orderBy(desc(voiceExamples.createdAt))
+    .limit(limit);
+}
+
+/**
+ * Voice examples for the trainer Q&A — no scenario filter (the trainer is
+ * general-purpose), just audience + language. Ranked by similarity to the
+ * question when available, otherwise by recency.
+ */
+async function retrieveVoiceExamplesByAudience(
+  audience: Lead["audience"],
+  language: Lead["language"],
+  query: string,
+  limit = 5
+): Promise<{ finalText: string }[]> {
+  const baseFilter = and(
+    eq(voiceExamples.audience, audience),
+    eq(voiceExamples.language, language)
+  );
+
+  if (query.trim()) {
+    try {
+      const queryEmbedding = await embedOne(query);
+      const distance = cosineDistance(voiceExamples.embedding, queryEmbedding);
+      const rows = await db
+        .select({ finalText: voiceExamples.finalText })
+        .from(voiceExamples)
+        .where(and(baseFilter, isNotNull(voiceExamples.embedding)))
+        .orderBy(distance)
+        .limit(limit);
+      if (rows.length > 0) return rows;
+    } catch {
+      // fall through
+    }
+  }
+
+  return db
+    .select({ finalText: voiceExamples.finalText })
+    .from(voiceExamples)
+    .where(baseFilter)
+    .orderBy(desc(voiceExamples.createdAt))
+    .limit(limit);
 }
 
 /**
@@ -410,37 +571,28 @@ export interface CustomerQAOutput {
   durationMs: number;
 }
 
-/**
- * Answers a generic customer-style question using the KB only — no lead PII
- * involved. Used by the training playground to grow product_kb. Tone is
- * influenced by voice_examples for the same audience+language (any scenario)
- * so the answer matches the user's house style.
- */
-export async function answerCustomerQuestion(
-  input: CustomerQAInput
-): Promise<CustomerQAOutput> {
-  ensureGatewayKey();
-  const start = Date.now();
+export interface CustomerQAPrompts {
+  systemPrompt: string;
+  question: string;
+  model: string;
+}
 
-  const [knowledge, rules] = await Promise.all([
-    loadKnowledgeContext(),
+/**
+ * Builds the system prompt for a customer Q&A — no PII involved, no
+ * deanonymization needed. Pulls KB + rules + voice examples so the answer
+ * matches the user's house style for that audience+language.
+ */
+export async function buildCustomerQAPrompts(
+  input: CustomerQAInput
+): Promise<CustomerQAPrompts> {
+  const [knowledge, rules, examples] = await Promise.all([
+    retrieveKnowledgeForQuery(input.question),
     loadAiRules(),
+    retrieveVoiceExamplesByAudience(input.audience, input.language, input.question),
   ]);
   const knowledgeBlock = knowledge
     ? `\n\n--- ידע על המוצר (השתמש בעובדות מכאן בלבד) ---\n\n${knowledge}\n\n--- סוף ---\n`
     : "";
-
-  const examples = await db
-    .select({ finalText: voiceExamples.finalText })
-    .from(voiceExamples)
-    .where(
-      and(
-        eq(voiceExamples.audience, input.audience),
-        eq(voiceExamples.language, input.language)
-      )
-    )
-    .orderBy(desc(voiceExamples.createdAt))
-    .limit(5);
 
   const examplesBlock =
     examples.length > 0
@@ -466,14 +618,52 @@ export async function answerCustomerQuestion(
 5. ${langInstruction}
 ${rulesBlock(rules)}${knowledgeBlock}${examplesBlock}`;
 
+  return { systemPrompt, question: input.question, model: MODELS.extract };
+}
+
+/**
+ * Logs a Q&A call to aiAuditLog. Call this from streaming routes' onFinish.
+ */
+export async function logCustomerQA(args: {
+  input: CustomerQAInput;
+  model: string;
+  output: string;
+  durationMs: number;
+  error?: string;
+}) {
+  await db
+    .insert(aiAuditLog)
+    .values({
+      operation: "answer_customer_qa",
+      model: args.model,
+      inputAnonymized: `[${args.input.audience}/${args.input.language}] ${args.input.question}`,
+      output: args.output || null,
+      leadId: null,
+      durationMs: args.durationMs,
+      error: args.error ?? null,
+    })
+    .catch(() => {});
+}
+
+/**
+ * Non-streaming wrapper around buildCustomerQAPrompts. Kept for any caller that
+ * needs the answer atomically (cron jobs, batch tools).
+ */
+export async function answerCustomerQuestion(
+  input: CustomerQAInput
+): Promise<CustomerQAOutput> {
+  ensureGatewayKey();
+  const start = Date.now();
+  const prompts = await buildCustomerQAPrompts(input);
+
   let answer = "";
   let error: string | undefined;
   try {
     const { text } = await generateText({
-      model: MODELS.extract,
+      model: prompts.model,
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: input.question },
+        { role: "system", content: prompts.systemPrompt },
+        { role: "user", content: prompts.question },
       ],
     });
     answer = text.trim();
@@ -482,18 +672,7 @@ ${rulesBlock(rules)}${knowledgeBlock}${examplesBlock}`;
     throw e;
   } finally {
     const durationMs = Date.now() - start;
-    await db
-      .insert(aiAuditLog)
-      .values({
-        operation: "answer_customer_qa",
-        model: MODELS.extract,
-        inputAnonymized: `[${input.audience}/${input.language}] ${input.question}`,
-        output: answer || null,
-        leadId: null,
-        durationMs,
-        error: error ?? null,
-      })
-      .catch(() => {});
+    await logCustomerQA({ input, model: prompts.model, output: answer, durationMs, error });
   }
 
   return { answer, durationMs: Date.now() - start };
@@ -524,15 +703,6 @@ const SCENARIO_GUIDANCE: Record<DraftScenario, string> = {
   general: "תשובה מותאמת להקשר. תקרא את השיחה והבן מה צריך עכשיו.",
 };
 
-const DraftSchema = z.object({
-  draft: z
-    .string()
-    .describe("טקסט התשובה המוצעת בעברית/אנגלית/אידיש לפי שפת הליד"),
-  reasoning: z
-    .string()
-    .describe("משפט אחד קצר על למה בחרת בניסוח הזה"),
-});
-
 export interface DraftReplyInput {
   lead: Lead;
   recentInteractions: Interaction[];
@@ -540,52 +710,66 @@ export interface DraftReplyInput {
   freeNote?: string;
 }
 
+export interface DraftContextSnapshot {
+  scenario: DraftScenario;
+  audience: Lead["audience"];
+  language: Lead["language"];
+  exampleIds: string[];
+  interactionIds: string[];
+  freeNote?: string;
+}
+
 export interface DraftReplyOutput {
   draft: string;
-  reasoning: string;
   exampleCount: number;
-  contextSnapshot: {
-    scenario: DraftScenario;
-    audience: Lead["audience"];
-    language: Lead["language"];
-    exampleIds: string[];
-    interactionIds: string[];
-    freeNote?: string;
-  };
+  contextSnapshot: DraftContextSnapshot;
   durationMs: number;
 }
 
+export interface DraftPrompts {
+  systemPrompt: string;
+  userPrompt: string;
+  model: string;
+  placeholderMap: Record<string, string>;
+  exampleCount: number;
+  contextSnapshot: DraftContextSnapshot;
+  inputAnonymized: string;
+}
+
 /**
- * Generates a customer-facing draft reply, learned from prior accepted edits.
- * Pulls top voice examples matching audience+scenario+language to teach the
- * model the user's tone — gracefully degrades to KB+rules when 0 examples.
+ * Builds the prompts + anonymization context for a draft. Returns everything
+ * the streaming route handler needs: deanonymization map, audit-log payload,
+ * and the context snapshot to attach when the user saves the final text as a
+ * voice example. The draft itself is plain text (not JSON) so it streams
+ * cleanly token-by-token.
  */
-export async function draftReply(
+export async function buildDraftPrompts(
   input: DraftReplyInput
-): Promise<DraftReplyOutput> {
-  ensureGatewayKey();
-  const start = Date.now();
+): Promise<DraftPrompts> {
   const { lead, recentInteractions, scenario, freeNote } = input;
 
-  const examples = await db
-    .select({
-      id: voiceExamples.id,
-      finalText: voiceExamples.finalText,
-      aiDraft: voiceExamples.aiDraft,
-    })
-    .from(voiceExamples)
-    .where(
-      and(
-        eq(voiceExamples.scenario, scenario),
-        eq(voiceExamples.audience, lead.audience),
-        eq(voiceExamples.language, lead.language)
-      )
-    )
-    .orderBy(desc(voiceExamples.createdAt))
-    .limit(5);
+  // RAG query: combine the lead's positioning signals with the explicit user
+  // hint. This guides retrieval toward examples + KB sections that are
+  // contextually relevant to *this* draft, not just the scenario in general.
+  const ragQuery = [
+    `תרחיש: ${scenario}`,
+    lead.whatSpokeToThem,
+    lead.objections,
+    lead.interestTags?.length ? `נושאים: ${lead.interestTags.join(", ")}` : null,
+    freeNote,
+    recentInteractions[0]?.content?.slice(0, 400),
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-  const [knowledge, rules] = await Promise.all([
-    loadKnowledgeContext(),
+  const [examples, knowledge, rules] = await Promise.all([
+    retrieveVoiceExamples({
+      scenario,
+      audience: lead.audience,
+      language: lead.language,
+      query: ragQuery,
+    }),
+    retrieveKnowledgeForQuery(ragQuery),
     loadAiRules(),
   ]);
   const knowledgeBlock = knowledge
@@ -595,10 +779,7 @@ export async function draftReply(
   const examplesBlock =
     examples.length > 0
       ? `\n\n--- דוגמאות מאושרות מהעבר (זה הסגנון, הטון והאורך הרצוי — חקה אותם) ---\n\n${examples
-          .map(
-            (e, i) =>
-              `### דוגמה ${i + 1}\n${e.finalText}`
-          )
+          .map((e, i) => `### דוגמה ${i + 1}\n${e.finalText}`)
           .join("\n\n")}\n\n--- סוף דוגמאות ---\n`
       : "\n\n(אין עדיין דוגמאות מאושרות לתרחיש הזה — נסח לפי הכללים והידע על המוצר.)\n";
 
@@ -658,6 +839,8 @@ export async function draftReply(
 4. אל תכתוב את שם הלקוח. השאר רווח להוספה ידנית, או פשוט פתח בלי שם.
 5. אל תמציא עובדות שלא בידע. אם חסר מידע (מחיר, מועד, סוג חדר זמין) — אל תנחש; כתוב "אבדוק ואחזור" או השאר מקום ל[X].
 6. ${langInstruction}
+
+החזר את הטיוטה כטקסט בלבד — בלי הקדמות, בלי הסברים, בלי כותרות, בלי מירכאות סוגרות. רק הטקסט שאיציק יוכל להעתיק ולשלוח.
 ${rulesBlock(rules)}${knowledgeBlock}${examplesBlock}`;
 
   const userPrompt = `### תרחיש: ${scenario}
@@ -669,46 +852,13 @@ ${anonProfile}
 ### היסטוריית האינטראקציות (אחרונות, מאונונם):
 ${anonInteractions}
 ${freeNote ? `\n### הוראה ספציפית מהמשתמש לטיוטה הזו:\n${freeNote}\n` : ""}
-נסח טיוטה אחת. החזר אותה בשדה draft. בשדה reasoning הסבר במשפט אחד קצר.`;
-
-  let result: { draft: string; reasoning: string } | undefined;
-  let error: string | undefined;
-  try {
-    const { object } = await generateObject({
-      model: MODELS.extract,
-      schema: DraftSchema,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    });
-    result = object;
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e);
-    throw e;
-  } finally {
-    const durationMs = Date.now() - start;
-    await db
-      .insert(aiAuditLog)
-      .values({
-        operation: `draft_reply:${scenario}`,
-        model: MODELS.extract,
-        inputAnonymized: `${anonProfile}\n---\n${anonInteractions}`,
-        output: result ? JSON.stringify(result) : null,
-        placeholderMap,
-        leadId: lead.id,
-        durationMs,
-        error: error ?? null,
-      })
-      .catch(() => {});
-  }
-
-  const draft = result ? deanonymize(result.draft, placeholderMap) : "";
-  const reasoning = result ? deanonymize(result.reasoning, placeholderMap) : "";
+נסח טיוטה אחת ותחזיר רק את הטקסט שלה.`;
 
   return {
-    draft,
-    reasoning,
+    systemPrompt,
+    userPrompt,
+    model: MODELS.extract,
+    placeholderMap,
     exampleCount: examples.length,
     contextSnapshot: {
       scenario,
@@ -718,6 +868,83 @@ ${freeNote ? `\n### הוראה ספציפית מהמשתמש לטיוטה הזו
       interactionIds: recentInteractions.slice(0, 10).map((i) => i.id),
       freeNote,
     },
+    inputAnonymized: `${anonProfile}\n---\n${anonInteractions}`,
+  };
+}
+
+/**
+ * Logs a draft generation to aiAuditLog. The output stored is the
+ * pre-deanonymization model output so the placeholderMap stays meaningful.
+ * Call from streaming routes' onFinish.
+ */
+export async function logDraftReply(args: {
+  scenario: DraftScenario;
+  leadId: string;
+  model: string;
+  inputAnonymized: string;
+  outputAnonymized: string;
+  placeholderMap: Record<string, string>;
+  durationMs: number;
+  error?: string;
+}) {
+  await db
+    .insert(aiAuditLog)
+    .values({
+      operation: `draft_reply:${args.scenario}`,
+      model: args.model,
+      inputAnonymized: args.inputAnonymized,
+      output: args.outputAnonymized || null,
+      placeholderMap: args.placeholderMap,
+      leadId: args.leadId,
+      durationMs: args.durationMs,
+      error: args.error ?? null,
+    })
+    .catch(() => {});
+}
+
+/**
+ * Non-streaming wrapper around buildDraftPrompts. Kept for batch / cron
+ * callers that need the draft atomically.
+ */
+export async function draftReply(
+  input: DraftReplyInput
+): Promise<DraftReplyOutput> {
+  ensureGatewayKey();
+  const start = Date.now();
+  const prompts = await buildDraftPrompts(input);
+
+  let outputAnonymized = "";
+  let error: string | undefined;
+  try {
+    const { text } = await generateText({
+      model: prompts.model,
+      messages: [
+        { role: "system", content: prompts.systemPrompt },
+        { role: "user", content: prompts.userPrompt },
+      ],
+    });
+    outputAnonymized = text.trim();
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    throw e;
+  } finally {
+    const durationMs = Date.now() - start;
+    await logDraftReply({
+      scenario: input.scenario,
+      leadId: input.lead.id,
+      model: prompts.model,
+      inputAnonymized: prompts.inputAnonymized,
+      outputAnonymized,
+      placeholderMap: prompts.placeholderMap,
+      durationMs,
+      error,
+    });
+  }
+
+  return {
+    draft: deanonymize(outputAnonymized, prompts.placeholderMap),
+    exampleCount: prompts.exampleCount,
+    contextSnapshot: prompts.contextSnapshot,
     durationMs: Date.now() - start,
   };
 }

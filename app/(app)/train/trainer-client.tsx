@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   Wand2,
@@ -9,9 +9,10 @@ import {
   Check,
   BookmarkPlus,
   RefreshCw,
+  StopCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { askQuestion, saveAsFaq } from "./actions";
+import { saveAsFaq } from "./actions";
 import {
   AUDIENCE_LABELS,
   LANGUAGE_LABELS,
@@ -37,36 +38,75 @@ export function TrainerClient() {
   const [language, setLanguage] = useState<Language>("he");
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<AnswerState | null>(null);
+  const [streaming, setStreaming] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [asking, startAsk] = useTransition();
   const [saving, startSave] = useTransition();
+  const abortRef = useRef<AbortController | null>(null);
 
   const dirty =
     answer != null && answer.finalText.trim() !== answer.aiAnswer.trim();
 
-  function ask() {
+  async function ask() {
     const q = question.trim();
     if (!q) {
       toast.error("כתוב שאלה");
       return;
     }
-    startAsk(async () => {
-      const res = await askQuestion({ question: q, audience, language });
-      if (!res.ok) {
-        toast.error(res.error || "ניסוח נכשל");
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setStreaming(true);
+    setSavedId(null);
+    setCopied(false);
+    setAnswer({
+      question: q,
+      aiAnswer: "",
+      finalText: "",
+      language,
+      audience,
+    });
+
+    try {
+      const res = await fetch("/api/ai/trainer/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, audience, language }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        const msg = await res.text().catch(() => "");
+        toast.error(msg || "ניסוח נכשל");
+        setAnswer(null);
         return;
       }
-      setAnswer({
-        question: q,
-        aiAnswer: res.answer,
-        finalText: res.answer,
-        language,
-        audience,
-      });
-      setSavedId(null);
-      setCopied(false);
-    });
+
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      let acc = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+        acc += value;
+        setAnswer((prev) =>
+          prev ? { ...prev, aiAnswer: acc, finalText: acc } : prev
+        );
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      toast.error(e instanceof Error ? e.message : "ניסוח נכשל");
+      setAnswer(null);
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }
+
+  function stop() {
+    abortRef.current?.abort();
   }
 
   async function copy() {
@@ -103,6 +143,7 @@ export function TrainerClient() {
   }
 
   function reset() {
+    abortRef.current?.abort();
     setQuestion("");
     setAnswer(null);
     setSavedId(null);
@@ -177,19 +218,25 @@ export function TrainerClient() {
           />
         </div>
 
-        <button
-          type="button"
-          disabled={asking}
-          onClick={ask}
-          className="press w-full h-11 rounded-xl bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 disabled:opacity-60"
-        >
-          {asking ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
+        {streaming ? (
+          <button
+            type="button"
+            onClick={stop}
+            className="press w-full h-11 rounded-xl bg-secondary text-secondary-foreground font-semibold flex items-center justify-center gap-2"
+          >
+            <StopCircle className="size-4" />
+            עצור
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={ask}
+            className="press w-full h-11 rounded-xl bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2"
+          >
             <Wand2 className="size-4" />
-          )}
-          {answer ? "שאל שוב" : "ענה"}
-        </button>
+            {answer ? "שאל שוב" : "ענה"}
+          </button>
+        )}
       </section>
 
       {answer && (
@@ -208,30 +255,36 @@ export function TrainerClient() {
             </button>
           </header>
 
-          <textarea
-            value={answer.finalText}
-            onChange={(e) =>
-              setAnswer({ ...answer, finalText: e.target.value })
-            }
-            className="w-full text-sm rounded-xl border border-border bg-background p-3 min-h-[180px] resize-y focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed"
-            dir="auto"
-          />
+          <div className="relative">
+            <textarea
+              value={answer.finalText}
+              onChange={(e) =>
+                setAnswer({ ...answer, finalText: e.target.value })
+              }
+              className="w-full text-sm rounded-xl border border-border bg-background p-3 min-h-[180px] resize-y focus:outline-none focus:ring-2 focus:ring-primary/30 leading-relaxed"
+              dir="auto"
+            />
+            {streaming && (
+              <Loader2 className="size-3.5 animate-spin absolute top-2.5 left-2.5 text-muted-foreground" />
+            )}
+          </div>
 
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              disabled={streaming || !answer.finalText.trim()}
               onClick={copy}
-              className="press h-10 rounded-xl bg-secondary text-secondary-foreground text-sm font-semibold flex items-center justify-center gap-1.5"
+              className="press h-10 rounded-xl bg-secondary text-secondary-foreground text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
               {copied ? "הועתק" : "העתק"}
             </button>
             <button
               type="button"
-              disabled={saving || !!savedId}
+              disabled={streaming || saving || !!savedId || !answer.finalText.trim()}
               onClick={save}
               className={
-                "press h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 border transition " +
+                "press h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 border transition disabled:opacity-50 " +
                 (savedId
                   ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
                   : dirty

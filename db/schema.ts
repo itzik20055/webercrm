@@ -8,6 +8,7 @@ import {
   index,
   boolean,
   jsonb,
+  vector,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 
@@ -150,16 +151,25 @@ export const followups = pgTable(
   ]
 );
 
-export const productKb = pgTable("product_kb", {
-  id: uuid().primaryKey().defaultRandom(),
-  category: kbCategoryEnum().notNull(),
-  language: languageEnum().notNull().default("he"),
-  title: text().notNull(),
-  content: text().notNull(),
-  active: boolean().notNull().default(true),
-  createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
-});
+export const productKb = pgTable(
+  "product_kb",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    category: kbCategoryEnum().notNull(),
+    language: languageEnum().notNull().default("he"),
+    title: text().notNull(),
+    content: text().notNull(),
+    active: boolean().notNull().default(true),
+    embedding: vector({ dimensions: 1536 }),
+    embeddedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("product_kb_embedding_idx")
+      .using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ]
+);
 
 export const voiceExamples = pgTable(
   "voice_examples",
@@ -172,11 +182,15 @@ export const voiceExamples = pgTable(
     aiDraft: text().notNull(),
     finalText: text().notNull(),
     contextSnapshot: jsonb(),
+    embedding: vector({ dimensions: 1536 }),
+    embeddedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("voice_examples_match_idx").on(t.audience, t.scenario, t.language),
     index("voice_examples_created_idx").on(t.createdAt),
+    index("voice_examples_embedding_idx")
+      .using("hnsw", t.embedding.op("vector_cosine_ops")),
   ]
 );
 
