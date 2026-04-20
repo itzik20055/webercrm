@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { db, appSettings } from "@/db";
 
 const SENDER = "donotreply@aloha.global";
-const LOOKBACK_DAYS = 7;
+const LOOKBACK_DAYS = 14;
 const PROCESSED_KEY = "call_recordings_processed_uids";
 const MAX_TRACKED_UIDS = 500;
 
@@ -151,6 +151,53 @@ export async function fetchPendingCallRecordings(
       /* swallow */
     }
   }
+}
+
+/**
+ * Counts how many Call Recording emails exist in the lookback window and how
+ * many are still pending (not yet in the processed set). Cheap preview for
+ * the settings UI.
+ */
+export async function countPendingCallRecordings(): Promise<{
+  total: number;
+  pending: number;
+}> {
+  const processed = await loadProcessedUids();
+  const client = await openClient();
+  try {
+    const since = new Date();
+    since.setDate(since.getDate() - LOOKBACK_DAYS);
+    const uids = (await client.search({
+      from: SENDER,
+      subject: "Call Recording",
+      since,
+    } as never)) as number[] | null;
+    const all = uids ?? [];
+    const pending = all.filter((u) => !processed.has(u));
+    return { total: all.length, pending: pending.length };
+  } finally {
+    try {
+      await client.logout();
+    } catch {
+      /* swallow */
+    }
+  }
+}
+
+/**
+ * Clears the processed-UIDs set so every email in the lookback window will be
+ * reconsidered. Used when the user wants a fresh backfill (e.g. after
+ * deleting leads created from old recordings).
+ */
+export async function resetProcessedUids(): Promise<void> {
+  await db
+    .insert(appSettings)
+    .values({ key: PROCESSED_KEY, value: "[]", updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value: "[]", updatedAt: new Date() },
+    });
+  console.log("[gmail-imap] processed UIDs set reset");
 }
 
 /**

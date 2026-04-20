@@ -7,12 +7,15 @@ import {
   MessageCircle,
   BookOpen,
   ChevronLeft,
+  Phone,
 } from "lucide-react";
 import { db, pushSubscriptions, leads, productKb } from "@/db";
 import { sql } from "drizzle-orm";
 import { PushToggle } from "@/components/push-toggle";
 import { getSetting, setSetting } from "@/lib/settings";
 import { revalidatePath } from "next/cache";
+import { CallRecordingsPanel } from "./call-recordings-panel";
+import { countPendingCallRecordings } from "@/lib/gmail-imap";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +41,10 @@ export default async function SettingsPage() {
   const vapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const whatsappName = await getSetting("whatsapp_display_name");
   const hasGatewayKey = !!process.env.AI_GATEWAY_API_KEY;
+
+  const callStatus = await countPendingCallRecordings().catch((e) => ({
+    error: e instanceof Error ? e.message : String(e),
+  }));
 
   return (
     <div className="px-4 pt-4 pb-4 space-y-5">
@@ -90,6 +97,10 @@ export default async function SettingsPage() {
             </span>
           )}
         </div>
+      </Section>
+
+      <Section title="הקלטות שיחה" icon={<Phone className="size-4" />}>
+        <CallRecordingsPanel initial={callStatus} />
       </Section>
 
       <Section title="התראות" icon={<BellRing className="size-4" />}>
