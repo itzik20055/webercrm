@@ -1,8 +1,19 @@
 import { db, leads, interactions } from "@/db";
-import { sql } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { normalizePhone, phoneTail } from "./phone";
 import { transcribeAudio, extractLeadFromChat } from "./ai-client";
 import type { CallRecordingMail } from "./gmail-imap";
+
+const STATUS_RANK: Record<string, number> = {
+  new: 0,
+  contacted: 1,
+  interested: 2,
+  quoted: 3,
+  closing: 4,
+  booked: 5,
+  lost: 5,
+};
+const PRIORITY_RANK: Record<string, number> = { cold: 0, warm: 1, hot: 2 };
 
 export interface CallMeta {
   fromPhone: string;
@@ -163,5 +174,104 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
     })
     .where(sql`${leads.id} = ${lead.id}`);
 
+  // For existing leads, run AI on the aggregate of recent interactions and
+  // silently fill in any empty lead fields. This keeps the lead summary
+  // coherent across multiple calls — without this, only the very first call
+  // ever populates objections/interests/dates/etc.
+  if (!createdNew && transcript && transcript.length > 20) {
+    try {
+      await aggregateAndFillExistingLead(lead.id);
+    } catch (e) {
+      console.error("[call-recording] aggregate failed for", lead.id, e);
+    }
+  }
+
   return { uid: mail.uid, status: "ok", leadId: lead.id };
+}
+
+/**
+ * Re-extracts a lead's profile from its last several interactions and applies
+ * fill-if-empty semantics: empty fields get filled, populated fields are never
+ * overwritten, tags are unioned, status/priority can only move forward in
+ * pipeline rank. Used after a new call recording is appended to a lead the
+ * user has already triaged — so additional info doesn't get lost in the
+ * interaction timeline alone.
+ */
+async function aggregateAndFillExistingLead(leadId: string): Promise<void> {
+  const [full] = await db.select().from(leads).where(eq(leads.id, leadId));
+  if (!full) return;
+
+  const recent = await db
+    .select({
+      content: interactions.content,
+      direction: interactions.direction,
+    })
+    .from(interactions)
+    .where(eq(interactions.leadId, leadId))
+    .orderBy(desc(interactions.occurredAt))
+    .limit(10);
+
+  if (recent.length === 0) return;
+
+  const transcript = recent
+    .slice()
+    .reverse()
+    .map((i) => {
+      const speaker =
+        i.direction === "out"
+          ? "איציק"
+          : i.direction === "in"
+            ? full.name
+            : "[note]";
+      return `${speaker}: ${i.content}`;
+    })
+    .join("\n\n");
+
+  const { lead: extracted } = await extractLeadFromChat({
+    chatText: transcript,
+    leadName: full.name,
+    ourName: "איציק",
+    knownLeadId: full.id,
+  });
+
+  const update: Record<string, unknown> = {};
+  const fillIfEmpty = (field: string, current: unknown, next: unknown) => {
+    if (next == null || next === "") return;
+    if (current != null && current !== "") return;
+    update[field] = next;
+  };
+  fillIfEmpty("whatSpokeToThem", full.whatSpokeToThem, extracted.whatSpokeToThem);
+  fillIfEmpty("objections", full.objections, extracted.objections);
+  fillIfEmpty("numAdults", full.numAdults, extracted.numAdults);
+  fillIfEmpty("numChildren", full.numChildren, extracted.numChildren);
+  fillIfEmpty("agesChildren", full.agesChildren, extracted.agesChildren);
+  fillIfEmpty("datesInterest", full.datesInterest, extracted.datesInterest);
+  fillIfEmpty("roomTypeInterest", full.roomTypeInterest, extracted.roomTypeInterest);
+  fillIfEmpty("budgetSignal", full.budgetSignal, extracted.budgetSignal);
+
+  if (
+    extracted.status &&
+    extracted.status !== full.status &&
+    (STATUS_RANK[extracted.status] ?? -1) > (STATUS_RANK[full.status] ?? -1)
+  ) {
+    update.status = extracted.status;
+  }
+  if (
+    extracted.priority &&
+    extracted.priority !== full.priority &&
+    (PRIORITY_RANK[extracted.priority] ?? -1) > (PRIORITY_RANK[full.priority] ?? -1)
+  ) {
+    update.priority = extracted.priority;
+  }
+
+  const existingTags = new Set(full.interestTags ?? []);
+  const newTags = (extracted.interestTags ?? []).filter((t) => !existingTags.has(t));
+  if (newTags.length > 0) {
+    update.interestTags = [...(full.interestTags ?? []), ...newTags];
+  }
+
+  if (Object.keys(update).length > 0) {
+    update.updatedAt = new Date();
+    await db.update(leads).set(update).where(eq(leads.id, leadId));
+  }
 }

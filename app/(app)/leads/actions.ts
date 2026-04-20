@@ -805,13 +805,36 @@ export async function mergeImportIntoLead(formData: FormData) {
 
   await db.update(leads).set(update).where(eq(leads.id, parsed.leadId));
 
-  await db.insert(interactions).values({
-    leadId: parsed.leadId,
-    type: "whatsapp",
-    direction: "internal",
-    content: parsed.chatTranscript,
-    aiSummary: parsed.whatSpokeToThem ?? null,
-  });
+  // Dedup: WhatsApp re-exports are deterministic supersets of prior exports.
+  // If the new chat contains a previous upload verbatim, strip that prefix
+  // and only persist the delta. Otherwise we'd multiply historical messages
+  // every time the user re-imports the chat to capture new replies.
+  const priorUploads = await db
+    .select({ content: interactions.content })
+    .from(interactions)
+    .where(
+      and(eq(interactions.leadId, parsed.leadId), eq(interactions.type, "whatsapp"))
+    )
+    .orderBy(desc(interactions.occurredAt));
+
+  let newContent = parsed.chatTranscript;
+  for (const p of priorUploads) {
+    if (!p.content) continue;
+    const idx = newContent.indexOf(p.content);
+    if (idx >= 0) {
+      newContent = newContent.slice(idx + p.content.length).replace(/^\s+/, "");
+    }
+  }
+
+  if (newContent.length > 0) {
+    await db.insert(interactions).values({
+      leadId: parsed.leadId,
+      type: "whatsapp",
+      direction: "internal",
+      content: newContent,
+      aiSummary: parsed.whatSpokeToThem ?? null,
+    });
+  }
 
   if (parsed.followupAt) {
     const due = new Date(parsed.followupAt);
