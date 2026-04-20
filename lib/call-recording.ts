@@ -125,13 +125,18 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
   // as a pending review. The user approves or rejects via the /inbox page —
   // we deliberately don't auto-apply because phone transcripts are noisier
   // than WhatsApp and false positives would pollute the lead record.
+  //
+  // Only NEW leads get pulled into the inbox queue. For existing leads the
+  // user already triaged, additional recordings just append to the timeline —
+  // otherwise duplicate-emails-per-call from Free Telecom and any new call
+  // for an already-known number would yank the lead back into review.
   let pendingExtraction: unknown = null;
   let needsReview = false;
-  if (transcript && transcript.length > 20) {
+  if (createdNew && transcript && transcript.length > 20) {
     try {
       const { lead: extracted } = await extractLeadFromChat({
         chatText: transcript,
-        leadName: createdNew ? null : lead.name,
+        leadName: null,
         ourName: "איציק",
         knownLeadId: lead.id,
       });
