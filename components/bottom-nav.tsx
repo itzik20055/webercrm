@@ -2,18 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Users, BellRing, Inbox, Settings } from "lucide-react";
+import { Sparkles, Users, BellRing, Inbox, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
   href: string;
-  icon: typeof Home;
+  icon: typeof Sparkles;
   label: string;
   badge?: boolean;
 };
 
 const items: NavItem[] = [
-  { href: "/", icon: Home, label: "בית" },
+  { href: "/chat", icon: Sparkles, label: "צ'אט" },
   { href: "/leads", icon: Users, label: "לידים" },
   { href: "/followups", icon: BellRing, label: "פולואפים" },
   { href: "/inbox", icon: Inbox, label: "תיבה", badge: true },
@@ -30,7 +30,9 @@ export function BottomNav({ inboxCount = 0 }: { inboxCount?: number }) {
       <ul className="grid grid-cols-5 max-w-lg mx-auto px-2 pt-1.5 pb-1">
         {items.map(({ href, icon: Icon, label, badge }) => {
           const active =
-            href === "/" ? pathname === "/" : pathname.startsWith(href);
+            href === "/chat"
+              ? pathname === "/" || pathname.startsWith("/chat")
+              : pathname.startsWith(href);
           const showBadge = badge && inboxCount > 0;
           return (
             <li key={href}>
