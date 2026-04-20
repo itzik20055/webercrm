@@ -30,7 +30,6 @@ import { InterestTags } from "@/components/interest-tags";
 import { ResolveFollowupButton } from "@/components/resolve-followup";
 import { CopyChip } from "@/components/copy-chip";
 import { DraftCard } from "@/components/draft-card";
-import { CaptureCard } from "@/components/capture-card";
 
 export const dynamic = "force-dynamic";
 
@@ -187,6 +186,7 @@ export default async function LeadPage({
                       followupId={f.id}
                       leadId={lead.id}
                       label="בוצע"
+                      hasOtherOpen={openFollowups.length > 1}
                     />
                   </li>
                 );
@@ -194,8 +194,6 @@ export default async function LeadPage({
             </ul>
           )}
         </Card>
-
-        <CaptureCard leadId={lead.id} />
 
         <DraftCard leadId={lead.id} leadPhone={lead.phone} />
 

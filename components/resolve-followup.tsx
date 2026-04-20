@@ -2,10 +2,10 @@
 
 import { useState, useTransition } from "react";
 import { addDays, addHours, format, setHours, setMinutes } from "date-fns";
-import { Check, BellRing, CheckCircle2, XCircle, ChevronLeft } from "lucide-react";
+import { Check, BellRing, CheckCircle2, XCircle, ChevronLeft, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { resolveFollowup } from "@/app/(app)/leads/actions";
+import { completeFollowup, resolveFollowup } from "@/app/(app)/leads/actions";
 import { cn } from "@/lib/utils";
 
 const QUICK_OPTIONS = [
@@ -27,27 +27,46 @@ export function ResolveFollowupButton({
   followupId,
   leadId,
   label = "בוצע",
+  hasOtherOpen = false,
 }: {
   followupId: string;
   leadId: string;
   label?: string;
+  hasOtherOpen?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("menu");
+  const [completing, startComplete] = useTransition();
 
   function handleOpenChange(o: boolean) {
     setOpen(o);
     if (!o) setTimeout(() => setMode("menu"), 250);
   }
 
+  function quickComplete() {
+    startComplete(async () => {
+      try {
+        await completeFollowup(followupId, leadId);
+        toast.success("סומן כבוצע — נשאר פולואפ פתוח אחר");
+      } catch {
+        toast.error("שמירה נכשלה");
+      }
+    });
+  }
+
   return (
     <>
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className="press inline-flex items-center gap-1.5 px-3.5 h-10 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-sm font-semibold"
+        disabled={completing}
+        onClick={() => (hasOtherOpen ? quickComplete() : setOpen(true))}
+        className="press inline-flex items-center gap-1.5 px-3.5 h-10 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 text-sm font-semibold disabled:opacity-50"
       >
-        <Check className="size-4" />
+        {completing ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Check className="size-4" />
+        )}
         {label}
       </button>
 

@@ -4,10 +4,39 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db, leads, followups, interactions } from "@/db";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { extractLeadFromChat, type ExtractedLead } from "@/lib/ai-client";
 import { getSetting } from "@/lib/settings";
 import { extractPhones } from "@/lib/phone";
+
+async function supersedeOpenFollowups(leadId: string, exceptId?: string) {
+  const cond = exceptId
+    ? and(
+        eq(followups.leadId, leadId),
+        isNull(followups.completedAt),
+        ne(followups.id, exceptId)
+      )
+    : and(eq(followups.leadId, leadId), isNull(followups.completedAt));
+  await db.update(followups).set({ completedAt: new Date() }).where(cond);
+}
+
+export async function getLeadCapsule(id: string): Promise<
+  | { ok: true; lead: { id: string; name: string; phone: string; status: string } }
+  | { ok: false }
+> {
+  const [row] = await db
+    .select({
+      id: leads.id,
+      name: leads.name,
+      phone: leads.phone,
+      status: leads.status,
+    })
+    .from(leads)
+    .where(eq(leads.id, id))
+    .limit(1);
+  if (!row) return { ok: false };
+  return { ok: true, lead: row };
+}
 
 const createSchema = z.object({
   name: z.string().min(1, "שם חובה").max(120),
@@ -543,6 +572,7 @@ export async function applyCaptureUpdates(input: {
     if (parsed.followup) {
       const due = new Date(parsed.followup.dueAt);
       if (!isNaN(due.getTime())) {
+        await supersedeOpenFollowups(parsed.leadId);
         await db.insert(followups).values({
           leadId: parsed.leadId,
           dueAt: due,
@@ -584,6 +614,7 @@ export async function scheduleFollowup(formData: FormData) {
   const due = new Date(parsed.dueAt);
   if (isNaN(due.getTime())) throw new Error("Invalid date");
 
+  await supersedeOpenFollowups(parsed.leadId);
   await db.insert(followups).values({
     leadId: parsed.leadId,
     dueAt: due,
@@ -785,6 +816,7 @@ export async function mergeImportIntoLead(formData: FormData) {
   if (parsed.followupAt) {
     const due = new Date(parsed.followupAt);
     if (!isNaN(due.getTime())) {
+      await supersedeOpenFollowups(parsed.leadId);
       await db.insert(followups).values({
         leadId: parsed.leadId,
         dueAt: due,
@@ -867,6 +899,7 @@ export async function resolveFollowup(formData: FormData) {
   if (parsed.action === "next") {
     const due = new Date(parsed.dueAt);
     if (isNaN(due.getTime())) throw new Error("Invalid date");
+    await supersedeOpenFollowups(parsed.leadId, parsed.followupId);
     await db.insert(followups).values({
       leadId: parsed.leadId,
       dueAt: due,

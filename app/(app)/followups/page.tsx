@@ -60,21 +60,34 @@ export default async function FollowupsPage() {
           {overdue.length > 0 && (
             <Group title="באיחור" tone="destructive">
               {overdue.map((r) => (
-                <FollowupRow key={r.id} row={r} overdue />
+                <FollowupRow
+                  key={r.id}
+                  row={r}
+                  overdue
+                  hasOtherOpen={rows.some((x) => x.leadId === r.leadId && x.id !== r.id)}
+                />
               ))}
             </Group>
           )}
           {today.length > 0 && (
             <Group title="היום">
               {today.map((r) => (
-                <FollowupRow key={r.id} row={r} />
+                <FollowupRow
+                  key={r.id}
+                  row={r}
+                  hasOtherOpen={rows.some((x) => x.leadId === r.leadId && x.id !== r.id)}
+                />
               ))}
             </Group>
           )}
           {upcoming.length > 0 && (
             <Group title="הבא בתור">
               {upcoming.map((r) => (
-                <FollowupRow key={r.id} row={r} />
+                <FollowupRow
+                  key={r.id}
+                  row={r}
+                  hasOtherOpen={rows.some((x) => x.leadId === r.leadId && x.id !== r.id)}
+                />
               ))}
             </Group>
           )}
@@ -127,7 +140,15 @@ type Row = {
   leadAudience: "israeli_haredi" | "american_haredi" | "european_haredi";
 };
 
-function FollowupRow({ row, overdue }: { row: Row; overdue?: boolean }) {
+function FollowupRow({
+  row,
+  overdue,
+  hasOtherOpen,
+}: {
+  row: Row;
+  overdue?: boolean;
+  hasOtherOpen?: boolean;
+}) {
   const goodTime = isGoodTimeToCall(row.leadAudience);
   return (
     <div className="bg-card border border-border/70 rounded-2xl p-3.5 space-y-3 shadow-soft">
@@ -167,7 +188,12 @@ function FollowupRow({ row, overdue }: { row: Row; overdue?: boolean }) {
           <MessageCircle className="size-[16px]" strokeWidth={2.2} />
           וואטסאפ
         </a>
-        <ResolveFollowupButton followupId={row.id} leadId={row.leadId} label="בוצע" />
+        <ResolveFollowupButton
+          followupId={row.id}
+          leadId={row.leadId}
+          label="בוצע"
+          hasOtherOpen={hasOtherOpen}
+        />
       </div>
     </div>
   );
