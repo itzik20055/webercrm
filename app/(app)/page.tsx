@@ -95,7 +95,7 @@ export default async function HomePage() {
 
       {inboxCount > 0 && (
         <Link
-          href="/inbox"
+          href="/queue"
           className="press flex items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 shadow-soft"
         >
           <div className="size-11 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">

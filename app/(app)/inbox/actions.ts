@@ -127,11 +127,13 @@ export async function approvePendingExtraction(
   }
 
   revalidatePath("/inbox");
+  revalidatePath("/queue");
   revalidatePath("/leads");
   revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/queue");
   revalidatePath("/followups");
   revalidatePath("/");
-  redirect("/inbox");
+  redirect("/queue");
 }
 
 export async function rejectPendingExtraction(leadId: string) {
@@ -144,6 +146,7 @@ export async function rejectPendingExtraction(leadId: string) {
     })
     .where(eq(leads.id, leadId));
   revalidatePath("/inbox");
+  revalidatePath("/queue");
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/");
 }
@@ -151,7 +154,8 @@ export async function rejectPendingExtraction(leadId: string) {
 export async function deleteLeadFromInbox(leadId: string) {
   await db.delete(leads).where(eq(leads.id, leadId));
   revalidatePath("/inbox");
+  revalidatePath("/queue");
   revalidatePath("/leads");
   revalidatePath("/");
-  redirect("/inbox");
+  redirect("/queue");
 }

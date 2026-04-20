@@ -592,6 +592,7 @@ export async function applyCaptureUpdates(input: {
     revalidatePath(`/leads/${parsed.leadId}`);
     revalidatePath("/leads");
     revalidatePath("/followups");
+    revalidatePath("/queue");
     revalidatePath("/");
     return { ok: true };
   } catch (e) {
@@ -631,6 +632,7 @@ export async function scheduleFollowup(formData: FormData) {
 
   revalidatePath(`/leads/${parsed.leadId}`);
   revalidatePath("/followups");
+  revalidatePath("/queue");
   revalidatePath("/");
 }
 
@@ -882,6 +884,7 @@ export async function completeFollowup(followupId: string, leadId: string) {
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/followups");
+  revalidatePath("/queue");
   revalidatePath("/");
 }
 
@@ -965,5 +968,6 @@ export async function resolveFollowup(formData: FormData) {
 
   revalidatePath(`/leads/${parsed.leadId}`);
   revalidatePath("/followups");
+  revalidatePath("/queue");
   revalidatePath("/");
 }

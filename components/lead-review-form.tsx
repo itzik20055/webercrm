@@ -511,7 +511,7 @@ export function LeadReviewForm({
           </button>
         ) : (
           <Link
-            href="/inbox"
+            href="/queue"
             className="press h-12 px-4 rounded-full border border-border font-medium flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             חזרה

@@ -34,6 +34,7 @@ export async function pullCallRecordingsNow(): Promise<PullResult> {
   await guard();
   const result = await runCallRecordingsPull({ limit: 2 });
   revalidatePath("/inbox");
+  revalidatePath("/queue");
   revalidatePath("/settings");
   revalidatePath("/");
   return result;
