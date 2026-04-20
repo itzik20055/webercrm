@@ -195,7 +195,7 @@ export function GlobalCaptureFab() {
     }, 200);
   }, []);
 
-  // open via custom event (from lead page "תיעוד שיחה" buttons) or hash #capture
+  // open via custom event, hash #capture, or ?capture=<text> (iOS Shortcut share)
   useEffect(() => {
     const onEvent = (e: Event) => {
       const detail = (e as CustomEvent<{ text?: string }>).detail;
@@ -208,11 +208,23 @@ export function GlobalCaptureFab() {
         setOpen(true);
       }
     };
+    const consumeQuery = () => {
+      if (typeof window === "undefined") return;
+      const url = new URL(window.location.href);
+      const captured = url.searchParams.get("capture");
+      if (captured !== null) {
+        if (captured) setText(captured);
+        url.searchParams.delete("capture");
+        history.replaceState(null, "", url.pathname + (url.search || "") + url.hash);
+        setOpen(true);
+      }
+    };
     window.addEventListener("weber:open-capture", onEvent as EventListener);
     window.addEventListener("hashchange", onHash);
     if (typeof window !== "undefined" && window.location.hash === "#capture") {
       onHash();
     }
+    consumeQuery();
     return () => {
       window.removeEventListener("weber:open-capture", onEvent as EventListener);
       window.removeEventListener("hashchange", onHash);
