@@ -363,6 +363,103 @@ export async function extractLeadFromChat(
   return { lead: result!, durationMs: Date.now() - start };
 }
 
+export interface CustomerQAInput {
+  question: string;
+  audience: Lead["audience"];
+  language: Lead["language"];
+}
+
+export interface CustomerQAOutput {
+  answer: string;
+  durationMs: number;
+}
+
+/**
+ * Answers a generic customer-style question using the KB only — no lead PII
+ * involved. Used by the training playground to grow product_kb. Tone is
+ * influenced by voice_examples for the same audience+language (any scenario)
+ * so the answer matches the user's house style.
+ */
+export async function answerCustomerQuestion(
+  input: CustomerQAInput
+): Promise<CustomerQAOutput> {
+  ensureGatewayKey();
+  const start = Date.now();
+
+  const knowledge = await loadKnowledgeContext();
+  const knowledgeBlock = knowledge
+    ? `\n\n--- ידע על המוצר (השתמש בעובדות מכאן בלבד) ---\n\n${knowledge}\n\n--- סוף ---\n`
+    : "";
+
+  const examples = await db
+    .select({ finalText: voiceExamples.finalText })
+    .from(voiceExamples)
+    .where(
+      and(
+        eq(voiceExamples.audience, input.audience),
+        eq(voiceExamples.language, input.language)
+      )
+    )
+    .orderBy(desc(voiceExamples.createdAt))
+    .limit(5);
+
+  const examplesBlock =
+    examples.length > 0
+      ? `\n\n--- דוגמאות לסגנון התשובות שלי (חקה את הטון, האורך, בחירת המילים) ---\n\n${examples
+          .map((e, i) => `### דוגמה ${i + 1}\n${e.finalText}`)
+          .join("\n\n")}\n\n--- סוף ---\n`
+      : "";
+
+  const langInstruction =
+    input.language === "he"
+      ? "כתוב בעברית."
+      : input.language === "en"
+        ? "Write in English."
+        : "Write in Yiddish (with Hebrew letters).";
+
+  const systemPrompt = `אתה עוזר כתיבה לאיש מכירות של Weber Tours — נופש כשר באלפים האוסטריים בסנט אנטון. אתה עונה על שאלה כללית של לקוח (לא ליד ספציפי) — תשובה שתישמר כתשובה קנונית לשאלות חוזרות.
+
+כללים:
+1. ענה ישירות ובקצרה. בלי קלישאות מכירה, בלי אימוג׳ים.
+2. אל תמכור את מה שכבר מובן מאליו (כשרות, מנייני תפילה, אלפים) — תתמקד במה שהשאלה מבקשת.
+3. אם הידע לא נותן תשובה מלאה — תכתוב "אבדוק ואחזור" או השאר [X] במקום לנחש.
+4. תשובה ממוקדת ובוגרת. מתאימה לקהל ${input.audience}.
+5. ${langInstruction}
+${knowledgeBlock}${examplesBlock}`;
+
+  let answer = "";
+  let error: string | undefined;
+  try {
+    const { text } = await generateText({
+      model: MODELS.extract,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: input.question },
+      ],
+    });
+    answer = text.trim();
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    throw e;
+  } finally {
+    const durationMs = Date.now() - start;
+    await db
+      .insert(aiAuditLog)
+      .values({
+        operation: "answer_customer_qa",
+        model: MODELS.extract,
+        inputAnonymized: `[${input.audience}/${input.language}] ${input.question}`,
+        output: answer || null,
+        leadId: null,
+        durationMs,
+        error: error ?? null,
+      })
+      .catch(() => {});
+  }
+
+  return { answer, durationMs: Date.now() - start };
+}
+
 export type DraftScenario =
   | "first_reply"
   | "send_price"
