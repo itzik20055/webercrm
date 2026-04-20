@@ -25,6 +25,7 @@ import {
 import { approvePendingExtraction } from "@/app/(app)/inbox/actions";
 
 export interface ExtractedLeadData {
+  customerName: string | null;
   language: "he" | "en" | "yi";
   audience: "israeli_haredi" | "american_haredi" | "european_haredi";
   numAdults: number | null;
@@ -97,9 +98,13 @@ export function LeadReviewForm({
     return null;
   });
   const [name, setName] = useState(() => {
-    if (mode.kind === "import") return mode.inferredName ?? "";
-    // For auto-created leads from call recordings, name === phone is a placeholder
-    return mode.leadName === mode.leadPhone ? "" : mode.leadName;
+    if (mode.kind === "import")
+      return mode.inferredName ?? extracted.customerName ?? "";
+    // For auto-created leads from call recordings, name === phone is a
+    // placeholder — prefer the AI-extracted name from the conversation.
+    const isPlaceholder = mode.leadName === mode.leadPhone;
+    if (isPlaceholder) return extracted.customerName ?? "";
+    return mode.leadName;
   });
   const [phone, setPhone] = useState(() =>
     mode.kind === "import" ? mode.inferredPhone ?? "" : mode.leadPhone
@@ -242,6 +247,17 @@ export function LeadReviewForm({
                 className="w-full h-11 px-3 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
                 autoComplete="name"
               />
+              {extracted.customerName &&
+                extracted.customerName.trim() !== name.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => setName(extracted.customerName ?? "")}
+                    className="mt-1 inline-flex items-center gap-1 text-xs text-primary font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded px-1 -mx-1"
+                  >
+                    AI חילץ מהשיחה: <strong>{extracted.customerName}</strong>{" "}
+                    · החלף
+                  </button>
+                )}
             </Field>
             <Field label="טלפון" htmlFor="lrf-phone">
               <input
