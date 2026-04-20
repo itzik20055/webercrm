@@ -10,7 +10,7 @@ export async function GET() {
   const started = Date.now();
   let mails;
   try {
-    mails = await fetchPendingCallRecordings(20);
+    mails = await fetchPendingCallRecordings(5);
   } catch (e) {
     console.error("[cron call-recordings] fetch failed", e);
     return NextResponse.json(

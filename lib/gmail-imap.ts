@@ -2,6 +2,8 @@ import { ImapFlow } from "imapflow";
 import { simpleParser, type ParsedMail } from "mailparser";
 
 const PROCESSED_LABEL = "weber-processed";
+const SENDER = "donotreply@aloha.global";
+const LOOKBACK_DAYS = 7;
 
 export interface CallRecordingMail {
   uid: number;
@@ -44,12 +46,16 @@ async function openClient(): Promise<ImapFlow> {
  * keep cron runs bounded.
  */
 export async function fetchPendingCallRecordings(
-  limit = 20
+  limit = 5
 ): Promise<CallRecordingMail[]> {
   const client = await openClient();
   try {
+    const since = new Date();
+    since.setDate(since.getDate() - LOOKBACK_DAYS);
     const uids = await client.search({
+      from: SENDER,
       subject: "Call Recording",
+      since,
       not: { keyword: PROCESSED_LABEL },
     } as never);
     if (!uids || uids.length === 0) return [];
