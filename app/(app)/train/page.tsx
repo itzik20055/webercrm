@@ -1,9 +1,12 @@
 import { TrainerClient } from "./trainer-client";
+import { RulesEditor } from "./rules-editor";
+import { getAiRules } from "./actions";
 import { GraduationCap } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-export default function TrainPage() {
+export default async function TrainPage() {
+  const rules = await getAiRules();
   return (
     <div className="px-4 pt-5 pb-6 space-y-4">
       <header>
@@ -18,6 +21,7 @@ export default function TrainPage() {
           שאל שאלה כמו לקוח. ה-AI יענה לפי הידע שיש לו. אתה עורך — הגרסה הסופית נשמרת כשאלה נפוצה ומזינה את כל ההצעות העתידיות.
         </p>
       </header>
+      <RulesEditor initialRules={rules} />
       <TrainerClient />
     </div>
   );

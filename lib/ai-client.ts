@@ -4,6 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import {
   db,
   aiAuditLog,
+  appSettings,
   productKb,
   voiceExamples,
   type Lead,
@@ -33,6 +34,41 @@ function ensureGatewayKey() {
 
 const KB_TTL_MS = 60_000;
 let kbCache: { text: string; loadedAt: number } | null = null;
+
+const RULES_TTL_MS = 30_000;
+let rulesCache: { text: string; loadedAt: number } | null = null;
+const AI_RULES_KEY = "ai_writing_rules";
+
+/**
+ * Loads user-defined writing rules from app_settings. Cached briefly so the
+ * UI feels alive (changes propagate within ~30s) without hammering the DB.
+ * Returns "" when unset — the caller should skip injection in that case.
+ */
+export async function loadAiRules(): Promise<string> {
+  const now = Date.now();
+  if (rulesCache && now - rulesCache.loadedAt < RULES_TTL_MS)
+    return rulesCache.text;
+  try {
+    const [row] = await db
+      .select({ value: appSettings.value })
+      .from(appSettings)
+      .where(eq(appSettings.key, AI_RULES_KEY));
+    const text = row?.value?.trim() ?? "";
+    rulesCache = { text, loadedAt: now };
+    return text;
+  } catch {
+    return "";
+  }
+}
+
+export function invalidateAiRulesCache() {
+  rulesCache = null;
+}
+
+function rulesBlock(rules: string): string {
+  if (!rules.trim()) return "";
+  return `\n\n--- כללי כתיבה גלובליים (חובה לפעול לפיהם בכל תשובה — אלו ההוראות של בעל העסק) ---\n\n${rules.trim()}\n\n--- סוף כללים ---\n`;
+}
 
 const KB_CATEGORY_LABELS: Record<string, string> = {
   hotel: "מלון ומיקום",
@@ -386,7 +422,10 @@ export async function answerCustomerQuestion(
   ensureGatewayKey();
   const start = Date.now();
 
-  const knowledge = await loadKnowledgeContext();
+  const [knowledge, rules] = await Promise.all([
+    loadKnowledgeContext(),
+    loadAiRules(),
+  ]);
   const knowledgeBlock = knowledge
     ? `\n\n--- ידע על המוצר (השתמש בעובדות מכאן בלבד) ---\n\n${knowledge}\n\n--- סוף ---\n`
     : "";
@@ -425,7 +464,7 @@ export async function answerCustomerQuestion(
 3. אם הידע לא נותן תשובה מלאה — תכתוב "אבדוק ואחזור" או השאר [X] במקום לנחש.
 4. תשובה ממוקדת ובוגרת. מתאימה לקהל ${input.audience}.
 5. ${langInstruction}
-${knowledgeBlock}${examplesBlock}`;
+${rulesBlock(rules)}${knowledgeBlock}${examplesBlock}`;
 
   let answer = "";
   let error: string | undefined;
@@ -545,7 +584,10 @@ export async function draftReply(
     .orderBy(desc(voiceExamples.createdAt))
     .limit(5);
 
-  const knowledge = await loadKnowledgeContext();
+  const [knowledge, rules] = await Promise.all([
+    loadKnowledgeContext(),
+    loadAiRules(),
+  ]);
   const knowledgeBlock = knowledge
     ? `\n\n--- ידע על המוצר (השתמש בעובדות מכאן בלבד) ---\n\n${knowledge}\n\n--- סוף ---\n`
     : "";
@@ -616,7 +658,7 @@ export async function draftReply(
 4. אל תכתוב את שם הלקוח. השאר רווח להוספה ידנית, או פשוט פתח בלי שם.
 5. אל תמציא עובדות שלא בידע. אם חסר מידע (מחיר, מועד, סוג חדר זמין) — אל תנחש; כתוב "אבדוק ואחזור" או השאר מקום ל[X].
 6. ${langInstruction}
-${knowledgeBlock}${examplesBlock}`;
+${rulesBlock(rules)}${knowledgeBlock}${examplesBlock}`;
 
   const userPrompt = `### תרחיש: ${scenario}
 ${SCENARIO_GUIDANCE[scenario]}
