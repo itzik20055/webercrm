@@ -1,9 +1,50 @@
-import { db, leads, interactions } from "@/db";
+import { db, leads, interactions, appSettings } from "@/db";
 import { desc, eq, sql } from "drizzle-orm";
 import { normalizePhone, phoneTail } from "./phone";
 import { transcribeAudio, extractLeadFromChat } from "./ai-client";
 import type { CallRecordingMail } from "./gmail-imap";
 import { sendPushToAll } from "./push";
+
+const CALL_SIGNATURES_KEY = "processed_call_signatures";
+const MAX_TRACKED_SIGNATURES = 1000;
+
+function buildCallSignature(mail: CallRecordingMail): string {
+  // FreeTelecom re-emails the same call with new UIDs. The (subject,date) pair
+  // is the only stable identity for a recording across re-deliveries: subject
+  // carries [from=>to], date carries the call timestamp.
+  return `${mail.subject.trim()}|${mail.date.toISOString()}`;
+}
+
+async function loadProcessedSignatures(): Promise<Set<string>> {
+  const [row] = await db
+    .select({ value: appSettings.value })
+    .from(appSettings)
+    .where(eq(appSettings.key, CALL_SIGNATURES_KEY));
+  if (!row?.value) return new Set();
+  try {
+    const arr = JSON.parse(row.value) as string[];
+    return new Set(arr.filter((s) => typeof s === "string"));
+  } catch {
+    return new Set();
+  }
+}
+
+async function markSignatureProcessed(sig: string): Promise<void> {
+  const existing = await loadProcessedSignatures();
+  existing.add(sig);
+  // Bound the set; drop oldest entries (we don't track insert order, so just
+  // truncate after Array.from — newest writes still win because Set preserves
+  // insertion order in modern JS).
+  const arr = Array.from(existing).slice(-MAX_TRACKED_SIGNATURES);
+  const value = JSON.stringify(arr);
+  await db
+    .insert(appSettings)
+    .values({ key: CALL_SIGNATURES_KEY, value, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appSettings.key,
+      set: { value, updatedAt: new Date() },
+    });
+}
 
 const STATUS_RANK: Record<string, number> = {
   new: 0,
@@ -74,6 +115,17 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
     return { uid: mail.uid, status: "skipped", reason: "no audio attachment" };
   }
 
+  // Content-signature dedup: FreeTelecom re-emails the same recording with a
+  // fresh UID every cycle, so UID dedup alone doesn't help. Skip before the
+  // expensive Gemini transcribe if we've already processed this exact (subject,
+  // date) tuple.
+  const signature = buildCallSignature(mail);
+  const seen = await loadProcessedSignatures();
+  if (seen.has(signature)) {
+    console.log(`[call-recording] skipping duplicate (signature already processed): ${signature}`);
+    return { uid: mail.uid, status: "skipped", reason: "duplicate of already-processed call" };
+  }
+
   // Inbound = customer in `from`. Outbound = customer in `to`. Heuristic: the
   // shorter leg is "us" (a short DID) and the longer/mobile-looking leg is the
   // customer. If the from looks like an Israeli mobile (starts with 05), treat
@@ -132,6 +184,15 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
     content: `${header}\n\n${body}`,
     aiSummary: null,
   });
+
+  // Mark right after the row lands so a later DB hiccup doesn't leave the
+  // signature unrecorded — better to occasionally double-mark than to let a
+  // future re-delivery slip through.
+  try {
+    await markSignatureProcessed(signature);
+  } catch (e) {
+    console.error("[call-recording] markSignatureProcessed failed", signature, e);
+  }
 
   // Run AI extraction on the transcript (if we have one) and stash the result
   // as a pending review. The user approves or rejects via the /inbox page —
