@@ -10,6 +10,7 @@ import {
   runCallRecordingsPull,
   type PullResult,
 } from "@/lib/call-recordings-runner";
+import { getSetting, setSetting } from "@/lib/settings";
 
 async function guard() {
   if (!(await isAuthenticated())) {
@@ -48,4 +49,15 @@ export async function skipPastCallRecordings(): Promise<{
   const { skipped } = await skipAllPastCallRecordings();
   revalidatePath("/settings");
   return { ok: true, skipped };
+}
+
+export async function getCallRecordingsPaused(): Promise<boolean> {
+  await guard();
+  return (await getSetting("call_recordings_paused")) === "1";
+}
+
+export async function setCallRecordingsPaused(paused: boolean): Promise<void> {
+  await guard();
+  await setSetting("call_recordings_paused", paused ? "1" : "0");
+  revalidatePath("/settings");
 }

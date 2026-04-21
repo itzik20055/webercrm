@@ -1,11 +1,20 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Download, RefreshCw, AlertTriangle, CheckCircle2, SkipForward } from "lucide-react";
+import {
+  Download,
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle2,
+  SkipForward,
+  Pause,
+  Play,
+} from "lucide-react";
 import {
   pullCallRecordingsNow,
   skipPastCallRecordings,
   getCallRecordingsStatus,
+  setCallRecordingsPaused,
 } from "./call-recordings-actions";
 import type { PullResult } from "@/lib/call-recordings-runner";
 
@@ -23,18 +32,33 @@ type PullState =
 
 export function CallRecordingsPanel({
   initial,
+  initialPaused,
 }: {
   initial: { total: number; pending: number } | { error: string };
+  initialPaused: boolean;
 }) {
   const [status, setStatus] = useState<Status>(
     "error" in initial
       ? { state: "error", message: initial.error }
       : { state: "ok", total: initial.total, pending: initial.pending }
   );
+  const [paused, setPaused] = useState(initialPaused);
   const [pull, setPull] = useState<PullState>({ state: "idle" });
   const [confirmSkip, setConfirmSkip] = useState(false);
   const [skipMessage, setSkipMessage] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+
+  const togglePaused = () => {
+    const next = !paused;
+    setPaused(next);
+    startTransition(async () => {
+      try {
+        await setCallRecordingsPaused(next);
+      } catch {
+        setPaused(!next);
+      }
+    });
+  };
 
   const refreshStatus = () => {
     setStatus({ state: "loading" });
@@ -92,6 +116,29 @@ export function CallRecordingsPanel({
         מסמן את כל ההקלטות הנוכחיות בתור "לא צריך לעבד" — מכאן והלאה רק
         שיחות שיגיעו מעכשיו ואילך ייכנסו לתיבה.
       </p>
+
+      <button
+        type="button"
+        onClick={togglePaused}
+        className={
+          "press w-full h-11 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2 " +
+          (paused
+            ? "bg-amber-500/15 text-amber-800 dark:text-amber-300 border-amber-500/30"
+            : "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border-emerald-500/25")
+        }
+      >
+        {paused ? (
+          <>
+            <Pause className="size-4" />
+            הקרון מושהה — לחץ כדי להפעיל
+          </>
+        ) : (
+          <>
+            <Play className="size-4" />
+            הקרון פעיל — לחץ כדי להשהות
+          </>
+        )}
+      </button>
 
       <div className="rounded-xl bg-background border border-border p-3">
         {status.state === "loading" && (

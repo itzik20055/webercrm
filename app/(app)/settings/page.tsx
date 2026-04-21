@@ -49,6 +49,7 @@ export default async function SettingsPage() {
   const callStatus = await countPendingCallRecordings().catch((e) => ({
     error: e instanceof Error ? e.message : String(e),
   }));
+  const callsPaused = (await getSetting("call_recordings_paused")) === "1";
 
   return (
     <div className="px-4 pt-4 pb-4 space-y-5">
@@ -111,7 +112,7 @@ export default async function SettingsPage() {
       </Section>
 
       <Section title="הקלטות שיחה" icon={<Phone className="size-4" />}>
-        <CallRecordingsPanel initial={callStatus} />
+        <CallRecordingsPanel initial={callStatus} initialPaused={callsPaused} />
       </Section>
 
       <Section title="צריכת AI (24 ש' אחרונות)" icon={<CircleDollarSign className="size-4" />}>

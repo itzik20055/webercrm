@@ -1,7 +1,10 @@
 import { eq } from "drizzle-orm";
 import { db, appSettings } from "@/db";
 
-export type SettingKey = "whatsapp_display_name";
+export type SettingKey =
+  | "whatsapp_display_name"
+  | "ai_paused"
+  | "call_recordings_paused";
 
 export async function getSetting(key: SettingKey): Promise<string | null> {
   const rows = await db
