@@ -191,13 +191,9 @@ export default async function AiLogPage({
                         </span>
                       )}
                       {r.leadName ? (
-                        <Link
-                          href={`/leads/${r.leadId}`}
-                          className="text-primary truncate max-w-[140px]"
-                          onClick={(e) => e.stopPropagation()}
-                        >
+                        <span className="text-primary truncate max-w-[140px]">
                           {r.leadName}
-                        </Link>
+                        </span>
                       ) : null}
                     </div>
                     <div className="text-[11px] text-muted-foreground tabular-nums mt-0.5 truncate">

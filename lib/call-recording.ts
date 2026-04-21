@@ -189,24 +189,35 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
 
   // Best-effort push so itzik sees the call land while it's still fresh.
   // Failures here must not poison the rest of the pipeline.
-  try {
-    const isNamed = lead.name && lead.name !== lead.phone;
-    const titlePrefix = createdNew ? "ליד חדש · " : "";
-    const directionLabel = direction === "in" ? "שיחה נכנסת" : "שיחה יוצאת";
-    const title = `${titlePrefix}${directionLabel} — ${isNamed ? lead.name : lead.phone}`;
-    const body = transcript
-      ? transcript.replace(/\s+/g, " ").trim().slice(0, 140)
-      : transcriptionError
-        ? "הקלטה הגיעה — תמלול נכשל"
-        : "הקלטה הגיעה";
-    await sendPushToAll({
-      title,
-      body,
-      url: `/leads/${lead.id}`,
-      tag: `call-${lead.id}`,
-    });
-  } catch (e) {
-    console.error("[call-recording] push notify failed", lead.id, e);
+  // Skip the push entirely if the email itself is older than 30 minutes —
+  // that means we're chewing through a backlog and the user definitely
+  // doesn't want a buzz for a call that happened hours ago.
+  const PUSH_FRESHNESS_MS = 30 * 60 * 1000;
+  const mailAgeMs = Date.now() - mail.date.getTime();
+  if (mailAgeMs > PUSH_FRESHNESS_MS) {
+    console.log(
+      `[call-recording] skipping push for stale recording (age=${Math.round(mailAgeMs / 60000)}m, lead=${lead.id})`
+    );
+  } else {
+    try {
+      const isNamed = lead.name && lead.name !== lead.phone;
+      const titlePrefix = createdNew ? "ליד חדש · " : "";
+      const directionLabel = direction === "in" ? "שיחה נכנסת" : "שיחה יוצאת";
+      const title = `${titlePrefix}${directionLabel} — ${isNamed ? lead.name : lead.phone}`;
+      const body = transcript
+        ? transcript.replace(/\s+/g, " ").trim().slice(0, 140)
+        : transcriptionError
+          ? "הקלטה הגיעה — תמלול נכשל"
+          : "הקלטה הגיעה";
+      await sendPushToAll({
+        title,
+        body,
+        url: `/leads/${lead.id}`,
+        tag: `call-${lead.id}`,
+      });
+    } catch (e) {
+      console.error("[call-recording] push notify failed", lead.id, e);
+    }
   }
 
   return { uid: mail.uid, status: "ok", leadId: lead.id };

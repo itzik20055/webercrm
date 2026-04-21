@@ -65,11 +65,27 @@ self.addEventListener("notificationclick", (event) => {
   const url = event.notification.data?.url || "/";
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((wins) => {
-      const existing = wins.find((w) => "focus" in w);
-      if (existing) {
-        existing.navigate(url);
-        return existing.focus();
+      // Prefer an already-open client at the same path — just focus it.
+      const targetPath = new URL(url, self.location.origin).pathname;
+      const sameRoute = wins.find((w) => {
+        try {
+          return new URL(w.url).pathname === targetPath;
+        } catch {
+          return false;
+        }
+      });
+      if (sameRoute) {
+        return sameRoute.focus();
       }
+      // Otherwise focus an existing window and ask it to navigate via
+      // postMessage. iOS PWA Safari ignores client.navigate(), so the
+      // client-side router has to handle it.
+      const anyClient = wins.find((w) => "focus" in w);
+      if (anyClient) {
+        anyClient.postMessage({ type: "navigate", url });
+        return anyClient.focus();
+      }
+      // No window at all → open one fresh.
       return self.clients.openWindow(url);
     })
   );
