@@ -192,6 +192,14 @@ export async function UsagePanel() {
         </div>
       )}
 
+      <Link
+        href="/settings/ai-log"
+        className="press flex items-center justify-between h-10 px-3.5 rounded-xl border border-border bg-background text-sm font-medium"
+      >
+        <span>פתח לוג מפורט (כל קריאה ותוכנה)</span>
+        <span className="text-xs text-muted-foreground">←</span>
+      </Link>
+
       <p className="text-[10.5px] text-muted-foreground leading-relaxed flex items-start gap-1">
         <CircleDollarSign className="size-3 shrink-0 mt-0.5" />
         עלות משוערת — חישוב גס לפי מודל ובקשה. הסכום המדויק מופיע ב-Vercel AI
