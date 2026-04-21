@@ -17,7 +17,9 @@ import { PushToggle } from "@/components/push-toggle";
 import { getSetting, setSetting } from "@/lib/settings";
 import { revalidatePath } from "next/cache";
 import { CallRecordingsPanel } from "./call-recordings-panel";
+import { UsagePanel } from "./usage-panel";
 import { countPendingCallRecordings } from "@/lib/gmail-imap";
+import { CircleDollarSign } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -110,6 +112,10 @@ export default async function SettingsPage() {
 
       <Section title="הקלטות שיחה" icon={<Phone className="size-4" />}>
         <CallRecordingsPanel initial={callStatus} />
+      </Section>
+
+      <Section title="צריכת AI (24 ש' אחרונות)" icon={<CircleDollarSign className="size-4" />}>
+        <UsagePanel />
       </Section>
 
       <Section title="התראות" icon={<BellRing className="size-4" />}>
