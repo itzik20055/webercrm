@@ -3,6 +3,7 @@ import { desc, eq, sql } from "drizzle-orm";
 import { normalizePhone, phoneTail } from "./phone";
 import { transcribeAudio, extractLeadFromChat } from "./ai-client";
 import type { CallRecordingMail } from "./gmail-imap";
+import { sendPushToAll } from "./push";
 
 const STATUS_RANK: Record<string, number> = {
   new: 0,
@@ -184,6 +185,28 @@ export async function processCallRecording(mail: CallRecordingMail): Promise<{
     } catch (e) {
       console.error("[call-recording] aggregate failed for", lead.id, e);
     }
+  }
+
+  // Best-effort push so itzik sees the call land while it's still fresh.
+  // Failures here must not poison the rest of the pipeline.
+  try {
+    const isNamed = lead.name && lead.name !== lead.phone;
+    const titlePrefix = createdNew ? "ליד חדש · " : "";
+    const directionLabel = direction === "in" ? "שיחה נכנסת" : "שיחה יוצאת";
+    const title = `${titlePrefix}${directionLabel} — ${isNamed ? lead.name : lead.phone}`;
+    const body = transcript
+      ? transcript.replace(/\s+/g, " ").trim().slice(0, 140)
+      : transcriptionError
+        ? "הקלטה הגיעה — תמלול נכשל"
+        : "הקלטה הגיעה";
+    await sendPushToAll({
+      title,
+      body,
+      url: `/leads/${lead.id}`,
+      tag: `call-${lead.id}`,
+    });
+  } catch (e) {
+    console.error("[call-recording] push notify failed", lead.id, e);
   }
 
   return { uid: mail.uid, status: "ok", leadId: lead.id };
