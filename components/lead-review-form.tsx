@@ -22,7 +22,11 @@ import {
   createLeadFromImport,
   mergeImportIntoLead,
 } from "@/app/(app)/leads/actions";
-import { approvePendingExtraction } from "@/app/(app)/inbox/actions";
+import {
+  approvePendingExtraction,
+  approveCallRecording,
+  mergeCallRecording,
+} from "@/app/(app)/inbox/actions";
 
 export interface ExtractedLeadData {
   customerName: string | null;
@@ -78,6 +82,16 @@ export type ReviewMode =
       leadPhone: string;
       transcriptPreview?: string | null;
       sourceLabel: string;
+    }
+  | {
+      kind: "call";
+      pendingId: string;
+      inferredName: string | null;
+      inferredPhone: string;
+      existingMatches: ExistingMatch[];
+      transcriptPreview: string | null;
+      callAtLabel: string;
+      direction: "in" | "out";
     };
 
 export function LeadReviewForm({
@@ -88,17 +102,20 @@ export function LeadReviewForm({
   mode: ReviewMode;
 }) {
   const [mergeWith, setMergeWith] = useState<string | null>(() => {
-    if (mode.kind !== "import") return null;
-    if (
-      mode.existingMatches.length === 1 &&
-      mode.existingMatches[0].name.trim() === (mode.inferredName ?? "").trim()
-    ) {
-      return mode.existingMatches[0].id;
+    if (mode.kind === "import" || mode.kind === "call") {
+      if (
+        mode.existingMatches.length === 1 &&
+        mode.existingMatches[0].name.trim() === (mode.inferredName ?? "").trim()
+      ) {
+        return mode.existingMatches[0].id;
+      }
     }
     return null;
   });
   const [name, setName] = useState(() => {
     if (mode.kind === "import")
+      return mode.inferredName ?? extracted.customerName ?? "";
+    if (mode.kind === "call")
       return mode.inferredName ?? extracted.customerName ?? "";
     // For auto-created leads from call recordings, name === phone is a
     // placeholder — prefer the AI-extracted name from the conversation.
@@ -106,9 +123,11 @@ export function LeadReviewForm({
     if (isPlaceholder) return extracted.customerName ?? "";
     return mode.leadName;
   });
-  const [phone, setPhone] = useState(() =>
-    mode.kind === "import" ? mode.inferredPhone ?? "" : mode.leadPhone
-  );
+  const [phone, setPhone] = useState(() => {
+    if (mode.kind === "import") return mode.inferredPhone ?? "";
+    if (mode.kind === "call") return mode.inferredPhone;
+    return mode.leadPhone;
+  });
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -130,6 +149,13 @@ export function LeadReviewForm({
             await mergeImportIntoLead(formData);
           } else {
             await createLeadFromImport(formData);
+          }
+        } else if (mode.kind === "call") {
+          if (mergeWith) {
+            formData.set("leadId", mergeWith);
+            await mergeCallRecording(mode.pendingId, formData);
+          } else {
+            await approveCallRecording(mode.pendingId, formData);
           }
         } else {
           await approvePendingExtraction(mode.leadId, formData);
@@ -171,6 +197,18 @@ export function LeadReviewForm({
         </div>
       )}
 
+      {mode.kind === "call" && (
+        <div className="rounded-xl bg-primary-soft border border-primary/20 p-3 text-sm flex items-center gap-2">
+          <PhoneIcon className="size-4 text-primary shrink-0" />
+          <div>
+            <strong>
+              {mode.direction === "in" ? "שיחה נכנסת" : "שיחה יוצאת"}
+            </strong>{" "}
+            · {mode.callAtLabel}
+          </div>
+        </div>
+      )}
+
       <div className="rounded-2xl border bg-card p-4 space-y-2 shadow-soft">
         <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           סיכום AI
@@ -181,7 +219,8 @@ export function LeadReviewForm({
         </div>
       </div>
 
-      {mode.kind === "import" && mode.existingMatches.length > 0 && (
+      {(mode.kind === "import" || mode.kind === "call") &&
+        mode.existingMatches.length > 0 && (
         <Section title="לידים דומים במערכת">
           <p className="text-xs text-muted-foreground">
             נמצאו לידים בשם זהה או דומה. בחר אם למזג את השיחה לליד קיים, או ליצור
@@ -232,7 +271,9 @@ export function LeadReviewForm({
 
       <Section
         title={
-          mode.kind === "import" && mergeWith ? "פרטים שיתעדכנו" : "פרטי ליד"
+          (mode.kind === "import" || mode.kind === "call") && mergeWith
+            ? "פרטים שיתעדכנו"
+            : "פרטי ליד"
         }
       >
         {identityRequired && (
@@ -488,6 +529,17 @@ export function LeadReviewForm({
         </details>
       )}
 
+      {mode.kind === "call" && mode.transcriptPreview && (
+        <details className="rounded-2xl border bg-card p-3 text-sm" open>
+          <summary className="font-medium cursor-pointer">
+            תמלול מלא של השיחה
+          </summary>
+          <pre className="text-xs mt-3 max-h-96 overflow-auto whitespace-pre-wrap font-mono leading-relaxed text-muted-foreground">
+            {mode.transcriptPreview}
+          </pre>
+        </details>
+      )}
+
       {error && (
         <div
           role="alert"
@@ -511,7 +563,7 @@ export function LeadReviewForm({
           </button>
         ) : (
           <Link
-            href="/queue"
+            href="/inbox"
             className="press h-12 px-4 rounded-full border border-border font-medium flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             חזרה
@@ -535,7 +587,7 @@ export function LeadReviewForm({
 }
 
 function submitLabel(mode: ReviewMode, mergeWith: string | null): string {
-  if (mode.kind === "import") {
+  if (mode.kind === "import" || mode.kind === "call") {
     return mergeWith ? "מזג לליד הקיים" : "צור ליד";
   }
   return "אשר ושמור";

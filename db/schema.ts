@@ -249,6 +249,49 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
 });
 
+export const pendingCallRecordingStatusEnum = pgEnum(
+  "pending_call_recording_status",
+  ["pending", "approved", "merged", "dismissed"]
+);
+
+/**
+ * Inbox staging area for incoming phone-call recordings. Every transcribed
+ * recording lands here first; the user reviews the AI's extraction and
+ * chooses to create a brand-new lead, merge into an existing one, or dismiss.
+ * Auto-creating leads from raw call data turned out noisy (FreeTelecom
+ * delivers spam calls too) — this gates everything behind a one-tap approval.
+ */
+export const pendingCallRecordings = pgTable(
+  "pending_call_recordings",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    /** customer-side phone number (normalized) */
+    customerPhone: text().notNull(),
+    /** "in" if call was inbound to us, "out" if we called them */
+    direction: interactionDirectionEnum().notNull(),
+    /** original IMAP message subject (for debugging) */
+    mailSubject: text().notNull(),
+    /** the call's actual timestamp (Date header on the email) */
+    callAt: timestamp({ withTimezone: true }).notNull(),
+    transcript: text(),
+    transcriptionError: text(),
+    /** AI-extracted lead profile + suggested followup (ExtractedLead shape) */
+    extraction: jsonb(),
+    /** lead IDs that match this customer phone — UI offers them as merge targets */
+    matchCandidateIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    status: pendingCallRecordingStatusEnum().notNull().default("pending"),
+    /** if user picked merge, the target lead */
+    resolvedLeadId: uuid().references(() => leads.id, { onDelete: "set null" }),
+    resolvedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pending_call_recordings_status_idx").on(t.status),
+    index("pending_call_recordings_created_idx").on(t.createdAt),
+    index("pending_call_recordings_phone_idx").on(t.customerPhone),
+  ]
+);
+
 export const appSettings = pgTable("app_settings", {
   key: text().primaryKey(),
   value: text().notNull(),
@@ -303,6 +346,8 @@ export type VoiceExample = typeof voiceExamples.$inferSelect;
 export type NewVoiceExample = typeof voiceExamples.$inferInsert;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
+export type PendingCallRecording = typeof pendingCallRecordings.$inferSelect;
+export type NewPendingCallRecording = typeof pendingCallRecordings.$inferInsert;
 
 export const LANGUAGE_LABELS: Record<Lead["language"], string> = {
   he: "עברית",

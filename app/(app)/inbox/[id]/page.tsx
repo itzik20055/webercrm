@@ -43,11 +43,11 @@ export default async function InboxReviewPage({
     <div className="px-4 pt-4 pb-4 space-y-4">
       <header className="flex items-center justify-between">
         <Link
-          href="/queue"
+          href="/inbox"
           className="press flex items-center gap-1 text-sm text-muted-foreground h-11 px-2 -mx-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           <ChevronRight className="size-4" />
-          חזרה לתור
+          חזרה לתיבה
         </Link>
         <h1 className="text-lg font-semibold">אישור ליד מ-AI</h1>
         <div className="w-12" />

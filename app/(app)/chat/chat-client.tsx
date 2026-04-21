@@ -16,6 +16,7 @@ import {
   RefreshCw,
   ClipboardPaste,
   ChevronRight,
+  MessageSquareText,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -283,16 +284,26 @@ function ChatHeader({
           <Sparkles className="size-4 text-primary" aria-hidden="true" />
           <h1 className="text-lg font-bold tracking-tight">צ'אט</h1>
         </div>
-        {canReset && (
-          <button
-            type="button"
-            onClick={onReset}
-            className="press text-[11px] text-muted-foreground inline-flex items-center gap-1"
+        <div className="flex items-center gap-2">
+          <Link
+            href="/leads/import"
+            className="press text-[11px] font-medium text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"
+            aria-label="ייבוא צ'אט וואטסאפ"
           >
-            <RefreshCw className="size-3" />
-            שיחה חדשה
-          </button>
-        )}
+            <MessageSquareText className="size-3" />
+            ייבוא וואטסאפ
+          </Link>
+          {canReset && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="press text-[11px] text-muted-foreground inline-flex items-center gap-1"
+            >
+              <RefreshCw className="size-3" />
+              שיחה חדשה
+            </button>
+          )}
+        </div>
       </div>
 
       {lead ? (
@@ -431,6 +442,20 @@ function EmptyChat({
           </button>
         ))}
       </div>
+
+      <Link
+        href="/leads/import"
+        className="press flex items-center gap-3 text-right p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-900 dark:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+      >
+        <MessageSquareText className="size-5 shrink-0 text-emerald-700 dark:text-emerald-300" />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-semibold">ייבוא צ'אט וואטסאפ</div>
+          <div className="text-[11px] text-emerald-900/70 dark:text-emerald-200/70 leading-snug">
+            ZIP מוואטסאפ → AI מחלץ ליד מלא, כולל הודעות קוליות.
+          </div>
+        </div>
+        <ChevronRight className="size-4 -scale-x-100 text-emerald-700/60 dark:text-emerald-300/60" />
+      </Link>
     </div>
   );
 }

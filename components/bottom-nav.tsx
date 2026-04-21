@@ -2,25 +2,31 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sparkles, Users, ListChecks, BookOpen, Settings } from "lucide-react";
+import { Sparkles, Users, ListChecks, Inbox, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
   href: string;
   icon: typeof Sparkles;
   label: string;
-  badge?: boolean;
+  badge?: "queue" | "inbox";
 };
 
 const items: NavItem[] = [
   { href: "/chat", icon: Sparkles, label: "צ'אט" },
   { href: "/leads", icon: Users, label: "לידים" },
-  { href: "/queue", icon: ListChecks, label: "תור", badge: true },
-  { href: "/kb", icon: BookOpen, label: "ידע" },
+  { href: "/inbox", icon: Inbox, label: "תיבה", badge: "inbox" },
+  { href: "/queue", icon: ListChecks, label: "תור", badge: "queue" },
   { href: "/settings", icon: Settings, label: "הגדרות" },
 ];
 
-export function BottomNav({ queueCount = 0 }: { queueCount?: number }) {
+export function BottomNav({
+  queueCount = 0,
+  inboxCount = 0,
+}: {
+  queueCount?: number;
+  inboxCount?: number;
+}) {
   const pathname = usePathname();
   return (
     <nav
@@ -33,13 +39,14 @@ export function BottomNav({ queueCount = 0 }: { queueCount?: number }) {
             href === "/chat"
               ? pathname === "/" || pathname.startsWith("/chat")
               : pathname.startsWith(href);
-          const showBadge = badge && queueCount > 0;
+          const count = badge === "queue" ? queueCount : badge === "inbox" ? inboxCount : 0;
+          const showBadge = !!badge && count > 0;
           return (
             <li key={href}>
               <Link
                 href={href}
                 aria-current={active ? "page" : undefined}
-                aria-label={showBadge ? `${label} · ${queueCount} ממתינים` : label}
+                aria-label={showBadge ? `${label} · ${count} ממתינים` : label}
                 className="flex flex-col items-center justify-center gap-0.5 py-1.5 press rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               >
                 <span
@@ -59,9 +66,9 @@ export function BottomNav({ queueCount = 0 }: { queueCount?: number }) {
                   {showBadge && (
                     <span
                       className="absolute -top-0.5 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold flex items-center justify-center tabular-nums ring-2 ring-card"
-                      aria-label={`${queueCount} ממתינים לטיפול`}
+                      aria-label={`${count} ממתינים לטיפול`}
                     >
-                      {queueCount > 99 ? "99+" : queueCount}
+                      {count > 99 ? "99+" : count}
                     </span>
                   )}
                 </span>

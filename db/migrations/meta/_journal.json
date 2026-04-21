@@ -43,6 +43,13 @@
       "when": 1776726927091,
       "tag": "0005_voice_examples_scoring",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776785576886,
+      "tag": "0006_dazzling_jane_foster",
+      "breakpoints": true
     }
   ]
 }

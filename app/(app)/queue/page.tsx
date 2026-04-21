@@ -1,4 +1,3 @@
-import Link from "next/link";
 import {
   Phone,
   MessageCircle,
@@ -6,56 +5,35 @@ import {
   Sun,
   Moon,
   CheckCircle2,
-  Sparkles,
-  ChevronLeft,
-  Trash2,
-  X,
   BellRing,
 } from "lucide-react";
+import Link from "next/link";
 import { db, leads, followups, type Lead } from "@/db";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { asc, eq, isNull } from "drizzle-orm";
 import { StatusBadge } from "@/components/status-badge";
 import { ResolveFollowupButton } from "@/components/resolve-followup";
-import {
-  fullDate,
-  relativeTime,
-  telLink,
-  whatsappLink,
-} from "@/lib/format";
+import { fullDate, telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
 import { AUDIENCE_LABELS } from "@/db/schema";
-import {
-  rejectPendingExtraction,
-  deleteLeadFromInbox,
-  type PendingExtraction,
-} from "../inbox/actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function QueuePage() {
-  const [reviewLeads, openFollowups] = await Promise.all([
-    db
-      .select()
-      .from(leads)
-      .where(eq(leads.needsReview, true))
-      .orderBy(desc(leads.updatedAt))
-      .limit(50),
-    db
-      .select({
-        id: followups.id,
-        leadId: followups.leadId,
-        dueAt: followups.dueAt,
-        reason: followups.reason,
-        leadName: leads.name,
-        leadPhone: leads.phone,
-        leadStatus: leads.status,
-        leadAudience: leads.audience,
-      })
-      .from(followups)
-      .innerJoin(leads, eq(followups.leadId, leads.id))
-      .where(isNull(followups.completedAt))
-      .orderBy(asc(followups.dueAt)),
-  ]);
+  const openFollowups = await db
+    .select({
+      id: followups.id,
+      leadId: followups.leadId,
+      dueAt: followups.dueAt,
+      reason: followups.reason,
+      leadName: leads.name,
+      leadPhone: leads.phone,
+      leadStatus: leads.status,
+      leadAudience: leads.audience,
+    })
+    .from(followups)
+    .innerJoin(leads, eq(followups.leadId, leads.id))
+    .where(isNull(followups.completedAt))
+    .orderBy(asc(followups.dueAt));
 
   const now = new Date();
   const overdue = openFollowups.filter((r) => new Date(r.dueAt) < now);
@@ -72,8 +50,7 @@ export default async function QueuePage() {
     (r) => !overdue.includes(r) && !today.includes(r)
   );
 
-  const total =
-    reviewLeads.length + overdue.length + today.length + upcoming.length;
+  const total = overdue.length + today.length + upcoming.length;
 
   return (
     <div className="px-4 pt-5 pb-6 space-y-5">
@@ -95,15 +72,21 @@ export default async function QueuePage() {
       </header>
 
       {total === 0 && (
-        <div className="rounded-2xl bg-card border border-dashed border-border/70 p-6 text-center space-y-2">
+        <div className="rounded-2xl bg-card border border-dashed border-border/70 p-6 text-center space-y-3">
           <CheckCircle2
             className="size-8 text-emerald-500 mx-auto"
             strokeWidth={1.8}
           />
           <p className="font-semibold tracking-tight">כל הכבוד</p>
           <p className="text-sm text-muted-foreground">
-            התור ריק. אין לידים לאישור או פולואפים פתוחים.
+            אין פולואפים פתוחים כרגע.
           </p>
+          <Link
+            href="/inbox"
+            className="press inline-flex items-center justify-center h-10 px-4 rounded-full bg-primary-soft text-primary text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          >
+            פתח את התיבה
+          </Link>
         </div>
       )}
 
@@ -117,18 +100,6 @@ export default async function QueuePage() {
               hasOtherOpen={openFollowups.some(
                 (x) => x.leadId === r.leadId && x.id !== r.id
               )}
-            />
-          ))}
-        </Group>
-      )}
-
-      {reviewLeads.length > 0 && (
-        <Group title="לאישור" tone="primary" count={reviewLeads.length}>
-          {reviewLeads.map((l) => (
-            <ReviewCard
-              key={l.id}
-              lead={l}
-              pending={l.pendingExtraction as PendingExtraction | null}
             />
           ))}
         </Group>
@@ -172,22 +143,14 @@ function Group({
   children,
 }: {
   title: string;
-  tone?: "default" | "destructive" | "primary";
+  tone?: "default" | "destructive";
   count: number;
   children: React.ReactNode;
 }) {
   const titleClass =
-    tone === "destructive"
-      ? "text-destructive"
-      : tone === "primary"
-        ? "text-primary"
-        : "text-foreground";
+    tone === "destructive" ? "text-destructive" : "text-foreground";
   const dotClass =
-    tone === "destructive"
-      ? "bg-destructive"
-      : tone === "primary"
-        ? "bg-primary"
-        : "bg-muted-foreground/40";
+    tone === "destructive" ? "bg-destructive" : "bg-muted-foreground/40";
   return (
     <section className="space-y-2.5">
       <div className="flex items-center gap-1.5 px-1">
@@ -212,98 +175,6 @@ function Group({
       </div>
       <div className="space-y-2">{children}</div>
     </section>
-  );
-}
-
-function ReviewCard({
-  lead,
-  pending,
-}: {
-  lead: Lead;
-  pending: PendingExtraction | null;
-}) {
-  const reject = rejectPendingExtraction.bind(null, lead.id);
-  const del = deleteLeadFromInbox.bind(null, lead.id);
-  const summary = pending?.summary?.trim();
-
-  return (
-    <article className="bg-card border border-border/70 rounded-2xl shadow-soft overflow-hidden">
-      <Link
-        href={`/inbox/${lead.id}`}
-        className="press block p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        aria-label={`פתח לאישור: ${lead.name}`}
-      >
-        <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold tracking-tight truncate">
-                {lead.name}
-              </span>
-              {pending && (
-                <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
-                  <Sparkles className="size-2.5" />
-                  AI
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-              <span dir="ltr">{lead.phone}</span>
-              <span>·</span>
-              <span>{relativeTime(lead.updatedAt)}</span>
-            </div>
-            {summary ? (
-              <p className="text-sm text-foreground/85 line-clamp-2 leading-snug pt-0.5">
-                {summary}
-              </p>
-            ) : (
-              <p className="text-sm text-muted-foreground italic pt-0.5">
-                אין סיכום — תמלול נכשל או היה ריק.
-              </p>
-            )}
-          </div>
-          <ChevronLeft className="size-5 text-muted-foreground shrink-0 mt-1" />
-        </div>
-      </Link>
-
-      <div className="border-t border-border/60 bg-muted/30 px-2 py-1.5 flex items-center gap-1">
-        <a
-          href={telLink(lead.phone)}
-          className="press size-11 rounded-full text-primary flex items-center justify-center hover:bg-primary-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label={`חייג ל${lead.name}`}
-        >
-          <Phone className="size-[18px]" strokeWidth={2.2} />
-        </a>
-        <a
-          href={whatsappLink(lead.phone)}
-          target="_blank"
-          rel="noreferrer"
-          className="press size-11 rounded-full text-emerald-700 dark:text-emerald-300 flex items-center justify-center hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-          aria-label={`וואטסאפ ל${lead.name}`}
-        >
-          <MessageCircle className="size-[18px]" strokeWidth={2.2} />
-        </a>
-        <div className="flex-1" />
-        <form action={reject}>
-          <button
-            type="submit"
-            className="press h-11 px-3 rounded-full text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-card flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            aria-label={`דלג על ${lead.name}`}
-          >
-            <X className="size-4" strokeWidth={2.2} />
-            דלג
-          </button>
-        </form>
-        <form action={del}>
-          <button
-            type="submit"
-            className="press size-11 rounded-full text-destructive hover:bg-destructive/10 flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive"
-            aria-label={`מחק את ${lead.name}`}
-          >
-            <Trash2 className="size-4" strokeWidth={2.2} />
-          </button>
-        </form>
-      </div>
-    </article>
   );
 }
 
@@ -403,4 +274,3 @@ function FollowupRow({
     </div>
   );
 }
-
