@@ -83,6 +83,33 @@ export async function UsagePanel() {
       ? Math.max(0, extractRow.total - transcribeRow.total)
       : 0;
 
+  const transcribeBySource = await db
+    .select({
+      source: sql<string>`case
+        when ${aiAuditLog.inputAnonymized} like '%audio/mpeg%' then 'phone'
+        when ${aiAuditLog.inputAnonymized} like '%audio/mp3%' then 'phone'
+        when ${aiAuditLog.inputAnonymized} like '%audio/ogg%' then 'whatsapp'
+        when ${aiAuditLog.inputAnonymized} like '%audio/mp4%' then 'whatsapp'
+        when ${aiAuditLog.inputAnonymized} like '%audio/m4a%' then 'whatsapp'
+        when ${aiAuditLog.inputAnonymized} like '%audio/wav%' then 'other'
+        else 'unknown'
+      end`,
+      total: sql<number>`count(*)::int`,
+      failed: sql<number>`count(*) filter (where ${aiAuditLog.error} is not null)::int`,
+    })
+    .from(aiAuditLog)
+    .where(and(gte(aiAuditLog.createdAt, since), eq(aiAuditLog.operation, "transcribe")))
+    .groupBy(sql`1`)
+    .orderBy(desc(sql`count(*)`));
+
+  const transcribeCost = COST_PER_REQ_USD["google/gemini-2.5-pro"] ?? 0.08;
+  const SOURCE_LABEL: Record<string, string> = {
+    phone: "טלפון (mp3)",
+    whatsapp: "וואטסאפ (קולי)",
+    other: "אחר",
+    unknown: "לא ידוע",
+  };
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
@@ -102,6 +129,34 @@ export async function UsagePanel() {
             יש {totalFailed} קריאות שנכשלו. תמלולים שנכשלו <b>נשלחים שוב</b> בריצה
             הבאה — אם הכשלון היה זמני אתה משלם פעמיים. בדוק את הרשימה למטה.
           </div>
+        </div>
+      )}
+
+      {transcribeBySource.length > 0 && (
+        <div className="rounded-xl border border-border/60 bg-background overflow-hidden">
+          <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground bg-muted/40">
+            פירוק תמלולים לפי מקור
+          </div>
+          <ul className="divide-y divide-border/60">
+            {transcribeBySource.map((s) => (
+              <li key={s.source} className="flex items-center justify-between p-2.5 text-[12.5px]">
+                <span className="font-medium">
+                  {SOURCE_LABEL[s.source] ?? s.source}
+                  {s.failed > 0 && (
+                    <span className="text-destructive text-[11px] font-semibold ms-1.5">
+                      ({s.failed} נכשלו)
+                    </span>
+                  )}
+                </span>
+                <span className="text-right tabular-nums">
+                  <span className="font-semibold">{s.total}</span>
+                  <span className="text-[11px] text-muted-foreground ms-1.5">
+                    ~{fmtUsd(s.total * transcribeCost)}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
