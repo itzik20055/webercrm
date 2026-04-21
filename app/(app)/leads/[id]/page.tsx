@@ -23,6 +23,8 @@ import {
   INTERACTION_TYPE_LABELS,
   INTEREST_TAG_LABELS,
   LANGUAGE_LABELS,
+  STATUS_LABELS,
+  PRIORITY_LABELS,
 } from "@/db/schema";
 import { fullDate, relativeTime, telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
@@ -32,6 +34,7 @@ import { ResolveFollowupButton } from "@/components/resolve-followup";
 import { CopyChip } from "@/components/copy-chip";
 import { DraftCard } from "@/components/draft-card";
 import { DeleteLeadButton } from "@/components/delete-lead-button";
+import { LeadQuickActions } from "@/components/lead-action-sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -122,6 +125,17 @@ export default async function LeadPage({
             </button>
           )}
         </div>
+
+        <SynthesisCard
+          status={lead.status}
+          priority={lead.priority}
+          nextFollowup={openFollowups[0] ?? null}
+          numAdults={lead.numAdults}
+          numChildren={lead.numChildren}
+          datesInterest={lead.datesInterest}
+          whatSpokeToThem={lead.whatSpokeToThem}
+          interestTags={lead.interestTags}
+        />
 
         <div className="flex flex-wrap gap-1.5 text-xs">
           <CopyChip
@@ -344,24 +358,7 @@ export default async function LeadPage({
         </Card>
       </div>
 
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+72px)] inset-x-0 px-4 z-20 pointer-events-none">
-        <div className="max-w-lg mx-auto flex gap-2 pointer-events-auto">
-          <a
-            href="#capture"
-            className="press flex-1 h-12 rounded-full bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <MessageSquarePlus className="size-5" strokeWidth={2.2} />
-            תיעוד שיחה
-          </a>
-          <Link
-            href={`/leads/${id}/followup`}
-            className="press h-12 px-5 rounded-full bg-card border border-border font-semibold flex items-center justify-center gap-2 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            <BellRing className="size-5" strokeWidth={2.2} />
-            פולואפ
-          </Link>
-        </div>
-      </div>
+      <LeadQuickActions leadId={lead.id} />
     </div>
   );
 }
@@ -426,5 +423,124 @@ function Row({
       </dt>
       <dd className="font-medium">{value}</dd>
     </div>
+  );
+}
+
+const STATUS_TONE: Record<string, string> = {
+  new: "bg-blue-500/12 text-blue-700 dark:text-blue-300 border-blue-500/20",
+  contacted: "bg-sky-500/12 text-sky-700 dark:text-sky-300 border-sky-500/20",
+  interested: "bg-violet-500/12 text-violet-700 dark:text-violet-300 border-violet-500/20",
+  quoted: "bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/20",
+  closing: "bg-orange-500/12 text-orange-700 dark:text-orange-300 border-orange-500/20",
+  booked: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+  lost: "bg-muted text-muted-foreground border-border",
+};
+
+const PRIORITY_TONE: Record<string, string> = {
+  hot: "bg-destructive/12 text-destructive border-destructive/30",
+  warm: "bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/20",
+  cold: "bg-muted text-muted-foreground border-border",
+};
+
+function SynthesisCard({
+  status,
+  priority,
+  nextFollowup,
+  numAdults,
+  numChildren,
+  datesInterest,
+  whatSpokeToThem,
+  interestTags,
+}: {
+  status: keyof typeof STATUS_LABELS;
+  priority: keyof typeof PRIORITY_LABELS;
+  nextFollowup: { dueAt: Date; reason: string | null } | null;
+  numAdults: number | null;
+  numChildren: number | null;
+  datesInterest: string | null;
+  whatSpokeToThem: string | null;
+  interestTags: string[] | null;
+}) {
+  const tripBits: string[] = [];
+  if (numAdults != null || numChildren != null) {
+    const a = numAdults ?? 0;
+    const c = numChildren ?? 0;
+    if (c > 0) tripBits.push(`${a} מבוגרים · ${c} ילדים`);
+    else if (a > 0) tripBits.push(`${a} מבוגרים`);
+  }
+  if (datesInterest) tripBits.push(datesInterest);
+
+  const topInterests = (interestTags ?? []).slice(0, 3);
+  const fuOverdue = nextFollowup && new Date(nextFollowup.dueAt) < new Date();
+
+  return (
+    <section className="bg-card border border-border/70 rounded-2xl p-3.5 space-y-2.5 shadow-soft">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span
+          className={
+            "inline-flex items-center px-2.5 py-1 rounded-full text-[12px] font-semibold border " +
+            (STATUS_TONE[status] ?? STATUS_TONE.lost)
+          }
+        >
+          {STATUS_LABELS[status]}
+        </span>
+        <span
+          className={
+            "inline-flex items-center px-2.5 py-1 rounded-full text-[12px] font-semibold border " +
+            (PRIORITY_TONE[priority] ?? PRIORITY_TONE.cold)
+          }
+        >
+          {PRIORITY_LABELS[priority]}
+        </span>
+      </div>
+
+      <div
+        className={
+          "flex items-center gap-1.5 text-[13px] " +
+          (fuOverdue ? "text-destructive font-semibold" : "text-foreground")
+        }
+      >
+        <BellRing className="size-3.5 shrink-0" strokeWidth={2.2} />
+        {nextFollowup ? (
+          <span className="truncate">
+            {fuOverdue ? "באיחור — " : "פולואפ "}
+            {fullDate(nextFollowup.dueAt)}
+            {nextFollowup.reason ? (
+              <span className="text-muted-foreground font-normal">
+                {" · "}
+                {nextFollowup.reason}
+              </span>
+            ) : null}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">אין פולואפ קבוע</span>
+        )}
+      </div>
+
+      {tripBits.length > 0 && (
+        <div className="text-[13px] text-foreground tabular-nums">
+          {tripBits.join(" · ")}
+        </div>
+      )}
+
+      {whatSpokeToThem && (
+        <p className="text-[13px] text-foreground/90 line-clamp-2 leading-relaxed">
+          “{whatSpokeToThem}”
+        </p>
+      )}
+
+      {topInterests.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {topInterests.map((t) => (
+            <span
+              key={t}
+              className="inline-flex px-2 py-0.5 rounded-full bg-secondary/70 text-secondary-foreground text-[11px] font-medium"
+            >
+              {INTEREST_TAG_LABELS[t] ?? t}
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
