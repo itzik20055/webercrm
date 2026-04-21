@@ -1,5 +1,6 @@
 import { BottomNav } from "@/components/bottom-nav";
 import { GlobalCaptureFab } from "@/components/global-capture-fab";
+import { GlobalSearchFab } from "@/components/global-search-fab";
 import { getQueueCount } from "@/lib/queue-count";
 
 export default async function AppLayout({
@@ -12,6 +13,7 @@ export default async function AppLayout({
     <div className="min-h-dvh flex flex-col bg-background">
       <main className="flex-1 pb-24 max-w-lg w-full mx-auto">{children}</main>
       <GlobalCaptureFab />
+      <GlobalSearchFab />
       <BottomNav queueCount={queueCount} />
     </div>
   );
