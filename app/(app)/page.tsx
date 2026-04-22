@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { db, leads } from "@/db";
 import { sql } from "drizzle-orm";
@@ -42,15 +43,7 @@ const greeting = () => {
   return "לילה טוב";
 };
 
-export default async function HomePage() {
-  const [counts, queue, inboxCount] = await Promise.all([
-    getStats(),
-    computeActionQueue(),
-    getInboxCount().catch(() => 0),
-  ]);
-  const total = queue.now.length + queue.today.length + queue.soon.length;
-  const allEmpty = total === 0;
-
+export default function HomePage() {
   return (
     <div className="px-4 pt-5 pb-6 space-y-5">
       <header className="flex items-end justify-between gap-3">
@@ -71,81 +64,122 @@ export default async function HomePage() {
         </Link>
       </header>
 
-      <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#1e3a8a] via-[#152a6b] to-[#0c1e6f] text-white p-5 shadow-card">
-        <div className="absolute -top-16 -left-10 size-44 rounded-full bg-white/8 blur-2xl" />
-        <div className="absolute -bottom-20 -right-10 size-52 rounded-full bg-[#f4d77c]/25 blur-3xl" />
-        <div className="absolute bottom-3 right-4 left-4 h-px bg-gradient-to-r from-transparent via-[#f4d77c]/40 to-transparent" />
-        <div className="relative">
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
-            <TrendingUp className="size-3.5" />
-            סטטיסטיקה
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-3">
-            <Stat label="פעילים" value={counts.active} />
-            <Stat
-              label="חמים"
-              value={counts.hot}
-              warn={counts.hot > 0}
-              icon={counts.hot > 0 ? <Flame className="size-3.5" strokeWidth={2.4} /> : null}
-            />
-            <Stat label="סגורים" value={counts.booked} accent />
-          </div>
+      <Suspense fallback={<StatsSkeleton />}>
+        <StatsSection />
+      </Suspense>
+
+      <Suspense fallback={null}>
+        <InboxBannerSection />
+      </Suspense>
+
+      <Suspense fallback={<ActionQueueSkeleton />}>
+        <ActionQueueSection />
+      </Suspense>
+    </div>
+  );
+}
+
+async function StatsSection() {
+  const counts = await getStats();
+  return (
+    <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#1e3a8a] via-[#152a6b] to-[#0c1e6f] text-white p-5 shadow-card">
+      <div className="absolute -top-16 -left-10 size-44 rounded-full bg-white/8 blur-2xl" />
+      <div className="absolute -bottom-20 -right-10 size-52 rounded-full bg-[#f4d77c]/25 blur-3xl" />
+      <div className="absolute bottom-3 right-4 left-4 h-px bg-gradient-to-r from-transparent via-[#f4d77c]/40 to-transparent" />
+      <div className="relative">
+        <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/70">
+          <TrendingUp className="size-3.5" />
+          סטטיסטיקה
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <Stat label="פעילים" value={counts.active} />
+          <Stat
+            label="חמים"
+            value={counts.hot}
+            warn={counts.hot > 0}
+            icon={counts.hot > 0 ? <Flame className="size-3.5" strokeWidth={2.4} /> : null}
+          />
+          <Stat label="סגורים" value={counts.booked} accent />
         </div>
       </div>
+    </div>
+  );
+}
 
-      {inboxCount > 0 && (
-        <Link
-          href="/inbox"
-          className="press flex items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 shadow-soft"
-        >
-          <div className="size-11 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
-            <Inbox className="size-5" strokeWidth={2.2} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-bold tracking-tight">
-              {inboxCount} {inboxCount === 1 ? "פריט" : "פריטים"} מחכים לאישור
-            </div>
-            <div className="text-xs text-muted-foreground mt-0.5">
-              הקלטות שיחה ולידים לסקירה
-            </div>
-          </div>
-          <ChevronLeft className="size-5 text-muted-foreground shrink-0" />
-        </Link>
-      )}
+async function InboxBannerSection() {
+  const inboxCount = await getInboxCount().catch(() => 0);
+  if (inboxCount === 0) return null;
+  return (
+    <Link
+      href="/inbox"
+      className="press flex items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 shadow-soft"
+    >
+      <div className="size-11 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
+        <Inbox className="size-5" strokeWidth={2.2} />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="font-bold tracking-tight">
+          {inboxCount} {inboxCount === 1 ? "פריט" : "פריטים"} מחכים לאישור
+        </div>
+        <div className="text-xs text-muted-foreground mt-0.5">
+          הקלטות שיחה ולידים לסקירה
+        </div>
+      </div>
+      <ChevronLeft className="size-5 text-muted-foreground shrink-0" />
+    </Link>
+  );
+}
 
-      {allEmpty ? (
-        <EmptyAll />
-      ) : (
-        <>
-          {queue.now.length > 0 && (
-            <ActionSection
-              title="עכשיו"
-              icon={<Zap className="size-[18px] text-destructive" strokeWidth={2.4} />}
-              count={queue.now.length}
-              tone="now"
-              actions={queue.now}
-            />
-          )}
-          {queue.today.length > 0 && (
-            <ActionSection
-              title="היום"
-              icon={<Clock className="size-[18px] text-amber-500" strokeWidth={2.2} />}
-              count={queue.today.length}
-              tone="today"
-              actions={queue.today}
-            />
-          )}
-          {queue.soon.length > 0 && (
-            <ActionSection
-              title="בקרוב"
-              icon={<CalendarDays className="size-[18px] text-muted-foreground" strokeWidth={2.2} />}
-              count={queue.soon.length}
-              tone="soon"
-              actions={queue.soon}
-            />
-          )}
-        </>
+async function ActionQueueSection() {
+  const queue = await computeActionQueue();
+  const total = queue.now.length + queue.today.length + queue.soon.length;
+  if (total === 0) return <EmptyAll />;
+  return (
+    <>
+      {queue.now.length > 0 && (
+        <ActionSection
+          title="עכשיו"
+          icon={<Zap className="size-[18px] text-destructive" strokeWidth={2.4} />}
+          count={queue.now.length}
+          tone="now"
+          actions={queue.now}
+        />
       )}
+      {queue.today.length > 0 && (
+        <ActionSection
+          title="היום"
+          icon={<Clock className="size-[18px] text-amber-500" strokeWidth={2.2} />}
+          count={queue.today.length}
+          tone="today"
+          actions={queue.today}
+        />
+      )}
+      {queue.soon.length > 0 && (
+        <ActionSection
+          title="בקרוב"
+          icon={<CalendarDays className="size-[18px] text-muted-foreground" strokeWidth={2.2} />}
+          count={queue.soon.length}
+          tone="soon"
+          actions={queue.soon}
+        />
+      )}
+    </>
+  );
+}
+
+function StatsSkeleton() {
+  return (
+    <div className="h-[128px] rounded-[22px] bg-gradient-to-br from-[#1e3a8a]/80 via-[#152a6b]/80 to-[#0c1e6f]/80 animate-pulse" />
+  );
+}
+
+function ActionQueueSkeleton() {
+  return (
+    <div className="space-y-2.5">
+      <div className="h-5 w-20 rounded-full bg-muted/25 animate-pulse" />
+      <div className="h-[92px] rounded-2xl bg-muted/20 animate-pulse" />
+      <div className="h-[92px] rounded-2xl bg-muted/20 animate-pulse" />
+      <div className="h-[92px] rounded-2xl bg-muted/20 animate-pulse" />
     </div>
   );
 }
