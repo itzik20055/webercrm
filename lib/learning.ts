@@ -378,7 +378,7 @@ export async function runLearningPass({
     .select()
     .from(interactions)
     .where(inArray(interactions.leadId, candidateIds))
-    .orderBy(asc(interactions.occurredAt));
+    .orderBy(asc(interactions.occurredAt), asc(interactions.id));
 
   const byLead = new Map<string, Interaction[]>();
   for (const i of allInteractions) {

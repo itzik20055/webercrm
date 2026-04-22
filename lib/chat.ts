@@ -152,7 +152,7 @@ export async function buildChatPrompts(input: ChatPromptInput): Promise<ChatProm
         .select()
         .from(interactions)
         .where(eq(interactions.leadId, lead.id))
-        .orderBy(desc(interactions.occurredAt))
+        .orderBy(desc(interactions.occurredAt), desc(interactions.id))
         .limit(10);
     }
   }

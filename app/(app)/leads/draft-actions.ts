@@ -47,7 +47,7 @@ export async function generateDraft(input: {
       .select()
       .from(interactions)
       .where(eq(interactions.leadId, parsed.leadId))
-      .orderBy(desc(interactions.occurredAt))
+      .orderBy(desc(interactions.occurredAt), desc(interactions.id))
       .limit(10);
 
     const result = await draftReply({

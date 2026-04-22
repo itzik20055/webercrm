@@ -57,7 +57,7 @@ export default async function LeadPage({
       .select()
       .from(interactions)
       .where(eq(interactions.leadId, id))
-      .orderBy(desc(interactions.occurredAt))
+      .orderBy(desc(interactions.occurredAt), desc(interactions.id))
       .limit(20),
     db
       .select()

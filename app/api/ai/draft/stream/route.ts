@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     .select()
     .from(interactions)
     .where(eq(interactions.leadId, parsed.leadId))
-    .orderBy(desc(interactions.occurredAt))
+    .orderBy(desc(interactions.occurredAt), desc(interactions.id))
     .limit(10);
 
   const prompts = await buildDraftPrompts({

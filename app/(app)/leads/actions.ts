@@ -444,7 +444,7 @@ export async function mergeImportIntoLead(formData: FormData) {
     .where(
       and(eq(interactions.leadId, parsed.leadId), eq(interactions.type, "whatsapp"))
     )
-    .orderBy(desc(interactions.occurredAt));
+    .orderBy(desc(interactions.occurredAt), desc(interactions.id));
 
   let newContent = parsed.chatTranscript;
   for (const p of priorUploads) {
@@ -631,13 +631,14 @@ export async function logInteractionsBatch(formData: FormData) {
     }
   });
 
-  const values = parsed.map((row) => ({
+  const baseNow = Date.now();
+  const values = parsed.map((row, i) => ({
     leadId,
     type: row.type,
     direction: row.direction,
     content: row.content,
     durationMin: row.durationMin ?? null,
-    occurredAt: row.occurredAt ? new Date(row.occurredAt) : new Date(),
+    occurredAt: row.occurredAt ? new Date(row.occurredAt) : new Date(baseNow + i),
   }));
 
   await db.insert(interactions).values(values);
@@ -745,7 +746,7 @@ export async function reprocessLeadWithAi(leadId: string): Promise<ReprocessResu
       .select()
       .from(interactions)
       .where(eq(interactions.leadId, leadId))
-      .orderBy(asc(interactions.occurredAt)),
+      .orderBy(asc(interactions.occurredAt), asc(interactions.id)),
     db
       .select()
       .from(followups)
