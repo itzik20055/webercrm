@@ -8,7 +8,6 @@ import {
   Copy,
   Check,
   MessageCircle,
-  Send,
   Loader2,
   StopCircle,
 } from "lucide-react";
@@ -151,12 +150,18 @@ export function DraftCard({
     setTimeout(() => setCopied(false), 1400);
   }
 
-  function save() {
-    if (!draft) return;
-    if (!draft.finalText.trim()) {
-      toast.error("אין מה לשמור");
-      return;
-    }
+  function sendAndSave() {
+    if (!draft || !draft.finalText.trim() || streaming) return;
+
+    // Open wa.me synchronously so mobile Safari doesn't treat it as a popup.
+    window.open(
+      whatsappLink(leadPhone, draft.finalText),
+      "_blank",
+      "noopener"
+    );
+
+    if (savedId || saving) return;
+
     startSave(async () => {
       const res = await saveVoiceExample({
         leadId,
@@ -256,57 +261,40 @@ export function DraftCard({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-[1fr_2fr] gap-2">
             <button
               type="button"
               disabled={streaming || !draft.finalText.trim()}
               onClick={copy}
-              className="press h-10 rounded-xl bg-secondary text-secondary-foreground text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
+              className="press h-11 rounded-xl bg-secondary text-secondary-foreground text-sm font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
               {copied ? "הועתק" : "העתק"}
             </button>
-            <a
-              href={whatsappLink(leadPhone, draft.finalText)}
-              target="_blank"
-              rel="noreferrer"
-              aria-disabled={streaming || !draft.finalText.trim()}
+            <button
+              type="button"
+              disabled={streaming || !draft.finalText.trim()}
+              onClick={sendAndSave}
               className={
-                "press h-10 rounded-xl bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-sm font-semibold flex items-center justify-center gap-1.5 " +
-                (streaming || !draft.finalText.trim() ? "pointer-events-none opacity-50" : "")
+                "press h-11 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-50 " +
+                (savedId
+                  ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25"
+                  : "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300")
               }
             >
-              <MessageCircle className="size-4" />
-              שלח בוואטסאפ
-            </a>
+              {saving ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : savedId ? (
+                <Check className="size-4" />
+              ) : (
+                <MessageCircle className="size-4" />
+              )}
+              {savedId ? "נשלח ונשמר · שלח שוב" : "שלח בוואטסאפ"}
+            </button>
           </div>
-
-          <button
-            type="button"
-            disabled={streaming || saving || !!savedId || !draft.finalText.trim()}
-            onClick={save}
-            className={
-              "press w-full h-10 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 border transition disabled:opacity-50 " +
-              (savedId
-                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
-                : dirty
-                  ? "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/25"
-                  : "bg-card text-foreground border-border")
-            }
-          >
-            {saving ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : savedId ? (
-              <Check className="size-4" />
-            ) : (
-              <Send className="size-4" />
-            )}
-            {savedId
-              ? "נשמר ללמידה"
-              : dirty
-                ? "שלחתי כסופית (עם העריכות שלי)"
-                : "שלחתי כסופית"}
-          </button>
+          <p className="text-[11px] text-muted-foreground text-center">
+            השליחה שומרת אוטומטית את הטקסט כדוגמה שה-AI ילמד ממנה
+          </p>
         </div>
       )}
     </section>
