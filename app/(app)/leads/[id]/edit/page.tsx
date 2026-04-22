@@ -47,6 +47,11 @@ export default async function EditLeadPage({
       </header>
 
       <form action={action} className="space-y-4">
+        <input
+          type="hidden"
+          name="expectedUpdatedAt"
+          value={lead.updatedAt.toISOString()}
+        />
         <Section title="פרטים אישיים">
           <Field label="שם">
             <input name="name" defaultValue={lead.name} required className="form-input" />

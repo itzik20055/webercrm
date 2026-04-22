@@ -76,6 +76,7 @@ export async function createLead(formData: FormData) {
 
 const updateSchema = z.object({
   id: z.string().uuid(),
+  expectedUpdatedAt: z.coerce.date(),
   name: z.string().min(1).max(120).optional(),
   phone: z.string().min(5).max(40).optional(),
   email: z.string().email().nullish().or(z.literal("")),
@@ -124,14 +125,25 @@ export async function updateLead(formData: FormData) {
   });
   const parsed = updateSchema.parse(obj);
 
-  const { id, ...rest } = parsed;
+  const { id, expectedUpdatedAt, ...rest } = parsed;
   const update: Record<string, unknown> = { updatedAt: new Date() };
   for (const [k, v] of Object.entries(rest)) {
     if (v === undefined) continue;
     update[k] = nullify(v as string | number | null);
   }
 
-  await db.update(leads).set(update).where(eq(leads.id, id));
+  const updated = await db
+    .update(leads)
+    .set(update)
+    .where(and(eq(leads.id, id), eq(leads.updatedAt, expectedUpdatedAt)))
+    .returning({ id: leads.id });
+
+  if (updated.length === 0) {
+    throw new Error(
+      "הליד עודכן ממקום אחר בזמן שערכת אותו. רענן את הדף ונסה שוב."
+    );
+  }
+
   revalidatePath(`/leads/${id}`);
   revalidatePath("/leads");
   revalidatePath("/");
