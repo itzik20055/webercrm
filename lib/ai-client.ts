@@ -557,10 +557,12 @@ export async function extractLeadFromChat(
   ensureGatewayKey();
   const start = Date.now();
 
-  const knownNames = [input.leadName, input.ourName].filter(
-    (n): n is string => !!n
+  const leadNames = [input.leadName].filter((n): n is string => !!n);
+  const { anonymized, placeholderMap } = anonymize(
+    input.chatText,
+    leadNames,
+    input.ourName
   );
-  const { anonymized, placeholderMap } = anonymize(input.chatText, knownNames);
   const knowledge = await loadKnowledgeContext();
   const knowledgeBlock = knowledge
     ? `\n\n--- ידע מובנה על המוצר (השתמש בזה כדי לזהות נכון מה הלקוח שואל ומה רלוונטי לו) ---\n\n${knowledge}\n\n--- סוף ידע מובנה ---\n`
@@ -577,9 +579,9 @@ export async function extractLeadFromChat(
           role: "system",
           content: `אתה מנתח שיחות WhatsApp עבור Weber Tours — נופש כשר באלפים האוסטריים בסנט אנטון. הלקוחות הם יהודים חרדים מישראל, ארה"ב ואירופה.${knowledgeBlock}
 
-תפקידך: לחלץ מידע מובנה משיחה בין "Me" (איש המכירות) לבין הלקוח ("[NAME]").
+תפקידך: לחלץ מידע מובנה משיחה בין איש המכירות לבין הלקוח ("[NAME]").
 
-השיחה מאונונמת: שם הלקוח מופיע כ-[NAME], טלפונים כ-[PHONE_1], אימיילים כ-[EMAIL_1]. הודעות קוליות מתומללות מופיעות כ-[🎤 Voice: "..."].
+השיחה מאונונמת: שם הלקוח מופיע כ-[NAME], שם איש המכירות כ-[SELF] (כשניתן להבדיל), טלפונים כ-[PHONE_1], אימיילים כ-[EMAIL_1]. הודעות קוליות מתומללות מופיעות כ-[🎤 Voice: "..."].
 
 כללים נוקשים:
 1. אל תמציא שום פרט. אם משהו לא נאמר במפורש בשיחה — החזר null או רשימה ריקה.
@@ -609,7 +611,7 @@ export async function extractLeadFromChat(
     - **אל תבלבל**:
       - שמות של מורי הוראה / רבנים שהוזכרו (הרב X, האדמו"ר Y) — זה לא שם הלקוח.
       - שמות של ילדים אם הוזכרו רק כילדים ("הילד שלי שלמה") — זה לא שם הלקוח.
-      - שם המוכר (איציק) — לא רלוונטי.
+      - שם המוכר (מופיע כ-[SELF] כאשר ניתן להבדיל) — לא רלוונטי.
     - **בחר השם המלא ביותר שזוהה**. אם נאמר "משה" בהתחלה ו"משה כהן" אחר כך → החזר "משה כהן".
     - **כתוב את השם בדיוק כפי שנשמע**, לא תרגום (אם אמר "Moshe Cohen" — שמור באנגלית; אם "משה כהן" — בעברית).
     - אם באמת אין שום שם בשיחה (תמלול קצר מדי, לקוח לא הציג את עצמו) → null.
@@ -817,10 +819,12 @@ export async function reprocessLeadProfile(
       }`
     : "אין פולואפ פתוח.";
 
-  const knownNames = [input.lead.name, input.ourName].filter(
-    (n): n is string => !!n
+  const leadNames = [input.lead.name].filter((n): n is string => !!n);
+  const { anonymized, placeholderMap } = anonymize(
+    transcript,
+    leadNames,
+    input.ourName
   );
-  const { anonymized, placeholderMap } = anonymize(transcript, knownNames);
   const knowledge = await loadKnowledgeContext();
   const knowledgeBlock = knowledge
     ? `\n\n--- ידע מובנה על המוצר ---\n\n${knowledge}\n\n--- סוף ידע ---\n`
@@ -828,7 +832,7 @@ export async function reprocessLeadProfile(
 
   const systemPrompt = `אתה מנתח לידים של Weber Tours — נופש כשר באלפים האוסטריים בסנט אנטון. אתה מקבל ליד קיים + כל היסטוריית השיחות איתו, ומייצר פרופיל מעודכן.${knowledgeBlock}
 
-השיחה מאונונמת: שם הלקוח מופיע כ-[NAME], טלפונים כ-[PHONE_1], אימיילים כ-[EMAIL_1].
+השיחה מאונונמת: שם הלקוח מופיע כ-[NAME], שם איש המכירות כ-[SELF] (כשניתן להבדיל), טלפונים כ-[PHONE_1], אימיילים כ-[EMAIL_1].
 
 כללים נוקשים:
 1. **אל תמציא שום פרט.** אם משהו לא נאמר במפורש בשיחה → החזר null או רשימה ריקה.

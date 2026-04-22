@@ -8,7 +8,8 @@ export interface AnonymizationResult {
 
 export function anonymize(
   text: string,
-  knownNames: string[] = []
+  knownNames: string[] = [],
+  ourName?: string
 ): AnonymizationResult {
   const map: Record<string, string> = {};
   let working = text;
@@ -31,9 +32,32 @@ export function anonymize(
     return ph;
   });
 
-  knownNames.forEach((name, i) => {
-    if (!name?.trim()) return;
-    const escaped = name.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Replace our (salesperson) name with [SELF] — but only if it's
+  // distinguishable from the lead names. If they collide, the text
+  // itself is ambiguous and [SELF] would mislabel lead mentions.
+  const trimmedOur = ourName?.trim();
+  const leadList = knownNames
+    .map((n) => n?.trim())
+    .filter((n): n is string => !!n);
+  const ourDistinguishable =
+    !!trimmedOur && leadList.every((n) => n !== trimmedOur);
+
+  if (ourDistinguishable) {
+    const escaped = trimmedOur.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(escaped, "gi");
+    let replaced = false;
+    working = working.replace(re, () => {
+      replaced = true;
+      return "[SELF]";
+    });
+    if (replaced) map["[SELF]"] = trimmedOur;
+  }
+
+  // Sort by length desc so shorter names don't replace inside longer ones
+  // (e.g. "אברהם" leaking into "אברהם משה").
+  const sortedLead = [...leadList].sort((a, b) => b.length - a.length);
+  sortedLead.forEach((name, i) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re = new RegExp(escaped, "gi");
     const ph = i === 0 ? "[NAME]" : `[NAME_${i + 1}]`;
     let replaced = false;
