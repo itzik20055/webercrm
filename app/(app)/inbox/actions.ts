@@ -291,9 +291,14 @@ export async function approveCallRecording(
   redirect(`/leads/${created.id}`);
 }
 
-const callMergeSchema = callApproveSchema.extend({
-  leadId: z.string().uuid(),
-});
+// Merging into an existing lead — the target already has name/phone, and the
+// UI hides those inputs when the user picks "merge". Drop them from the
+// required set; otherwise Zod throws before we ever touch the DB.
+const callMergeSchema = callApproveSchema
+  .omit({ name: true, phone: true })
+  .extend({
+    leadId: z.string().uuid(),
+  });
 
 /**
  * Merge a pending call recording into an existing lead. Fields use fill-if-
