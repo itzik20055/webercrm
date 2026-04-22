@@ -7,6 +7,7 @@ import { db, leads, followups, interactions, type Lead } from "@/db";
 import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { reprocessLeadProfile } from "@/lib/ai-client";
 import { getSetting } from "@/lib/settings";
+import { phoneTail } from "@/lib/phone";
 
 async function supersedeOpenFollowups(leadId: string, exceptId?: string) {
   const cond = exceptId
@@ -54,6 +55,22 @@ export async function createLead(formData: FormData) {
     notes: String(formData.get("notes") ?? "").trim() || undefined,
   };
   const parsed = createSchema.parse(raw);
+
+  const tail = phoneTail(parsed.phone);
+  if (tail.length >= 7) {
+    const [dup] = await db
+      .select({ id: leads.id, name: leads.name })
+      .from(leads)
+      .where(
+        sql`right(regexp_replace(${leads.phone}, '\D', '', 'g'), 9) = ${tail}`
+      )
+      .limit(1);
+    if (dup) {
+      throw new Error(
+        `כבר קיים ליד בשם "${dup.name}" עם הטלפון הזה. פתח אותו במקום ליצור חדש.`
+      );
+    }
+  }
 
   const [created] = await db
     .insert(leads)
