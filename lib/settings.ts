@@ -4,7 +4,8 @@ import { db, appSettings } from "@/db";
 export type SettingKey =
   | "whatsapp_display_name"
   | "ai_paused"
-  | "call_recordings_paused";
+  | "call_recordings_paused"
+  | "briefing_last_sent_date";
 
 export async function getSetting(key: SettingKey): Promise<string | null> {
   const rows = await db

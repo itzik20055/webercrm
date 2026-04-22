@@ -1,5 +1,5 @@
-const CACHE_NAME = "weber-v1";
-const APP_SHELL = ["/", "/leads", "/followups", "/settings"];
+const CACHE_NAME = "weber-v2";
+const APP_SHELL = ["/", "/leads", "/inbox", "/queue", "/settings"];
 
 self.addEventListener("install", (event) => {
   self.skipWaiting();
