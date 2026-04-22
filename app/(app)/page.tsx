@@ -18,7 +18,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
 import { computeActionQueue, type Action } from "@/lib/action-queue";
-import { getInboxCount } from "@/lib/inbox-count";
+import { getInboxCount } from "@/lib/queue-count";
 import { AUDIENCE_LABELS } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
@@ -95,7 +95,7 @@ export default async function HomePage() {
 
       {inboxCount > 0 && (
         <Link
-          href="/queue"
+          href="/inbox"
           className="press flex items-center gap-3 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/25 shadow-soft"
         >
           <div className="size-11 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 flex items-center justify-center shrink-0">
@@ -103,10 +103,10 @@ export default async function HomePage() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="font-bold tracking-tight">
-              {inboxCount} {inboxCount === 1 ? "ליד" : "לידים"} מחכים לאישור
+              {inboxCount} {inboxCount === 1 ? "פריט" : "פריטים"} מחכים לאישור
             </div>
             <div className="text-xs text-muted-foreground mt-0.5">
-              מהקלטות שיחה — אשר כדי לקבוע פולואפ
+              הקלטות שיחה ולידים לסקירה
             </div>
           </div>
           <ChevronLeft className="size-5 text-muted-foreground shrink-0" />
