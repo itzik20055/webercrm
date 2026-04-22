@@ -49,10 +49,8 @@ export default async function LeadPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [lead] = await db.select().from(leads).where(eq(leads.id, id));
-  if (!lead) notFound();
-
-  const [recentInteractions, openFollowups] = await Promise.all([
+  const [leadRows, recentInteractions, openFollowups] = await Promise.all([
+    db.select().from(leads).where(eq(leads.id, id)).limit(1),
     db
       .select()
       .from(interactions)
@@ -65,6 +63,8 @@ export default async function LeadPage({
       .where(and(eq(followups.leadId, id), isNull(followups.completedAt)))
       .orderBy(followups.dueAt),
   ]);
+  const lead = leadRows[0];
+  if (!lead) notFound();
 
   const goodTime = isGoodTimeToCall(lead.audience);
   const localNow = localTimeLabel(lead.audience);
