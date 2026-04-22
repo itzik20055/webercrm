@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Plus, Search, Users, Phone, MessageCircle, Sparkles } from "lucide-react";
 import { db, leads } from "@/db";
-import { and, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
@@ -57,14 +57,20 @@ export default async function LeadsListPage({
 
   const where = conds.length ? and(...conds) : undefined;
 
-  const rows = await db
-    .select()
-    .from(leads)
-    .where(where)
-    .orderBy(desc(leads.updatedAt))
-    .limit(200);
+  const LIMIT = 200;
+  const [rows, totalRow] = await Promise.all([
+    db
+      .select()
+      .from(leads)
+      .where(where)
+      .orderBy(desc(leads.updatedAt))
+      .limit(LIMIT),
+    db.select({ c: count() }).from(leads).where(where),
+  ]);
 
-  const total = rows.length;
+  const shown = rows.length;
+  const total = Number(totalRow[0]?.c ?? shown);
+  const truncated = total > shown;
 
   return (
     <div className="px-4 pt-5 pb-4 space-y-4">
@@ -136,7 +142,9 @@ export default async function LeadsListPage({
       </div>
 
       <p className="text-xs font-medium text-muted-foreground px-1 tabular-nums">
-        {total} לידים{total === 200 ? " · מציג 200 ראשונים, חפש כדי לצמצם" : ""}
+        {truncated
+          ? `מציג ${shown} מתוך ${total} — חפש או סנן כדי לצמצם`
+          : `${total} לידים`}
       </p>
 
       <div className="space-y-2">

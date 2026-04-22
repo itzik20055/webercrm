@@ -270,6 +270,9 @@ export async function scheduleFollowup(formData: FormData) {
   });
   const due = new Date(parsed.dueAt);
   if (isNaN(due.getTime())) throw new Error("Invalid date");
+  if (due.getTime() < Date.now() - 60_000) {
+    throw new Error("תאריך עבר — בחר מועד עתידי");
+  }
 
   await supersedeOpenFollowups(parsed.leadId);
   await db.insert(followups).values({
@@ -581,6 +584,9 @@ export async function resolveFollowup(formData: FormData) {
   if (parsed.action === "next") {
     const due = new Date(parsed.dueAt);
     if (isNaN(due.getTime())) throw new Error("Invalid date");
+    if (due.getTime() < Date.now() - 60_000) {
+      throw new Error("תאריך עבר — בחר מועד עתידי");
+    }
     await supersedeOpenFollowups(parsed.leadId, parsed.followupId);
     await db.insert(followups).values({
       leadId: parsed.leadId,

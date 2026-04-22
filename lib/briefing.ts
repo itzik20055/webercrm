@@ -18,7 +18,7 @@ export async function computeMorningBriefing(at: Date = new Date()): Promise<Bri
   const horizon = new Date(at.getTime() + 18 * 60 * 60 * 1000);
   const sanityFloor = new Date(at.getTime() - 14 * DAY_MS);
 
-  const [todayRows, overdueRows, hotRow] = await Promise.all([
+  const [todayRows, overdueRows, hotRow, hotNameRows] = await Promise.all([
     db
       .select({ leadName: leads.name })
       .from(followups)
@@ -59,6 +59,18 @@ export async function computeMorningBriefing(at: Date = new Date()): Promise<Bri
           ne(leads.status, "lost")
         )
       ),
+    db
+      .select({ name: leads.name })
+      .from(leads)
+      .where(
+        and(
+          eq(leads.priority, "hot"),
+          ne(leads.status, "booked"),
+          ne(leads.status, "lost")
+        )
+      )
+      .orderBy(sql`${leads.updatedAt} desc`)
+      .limit(3),
   ]);
 
   const todayCount = todayRows.length;
@@ -67,9 +79,13 @@ export async function computeMorningBriefing(at: Date = new Date()): Promise<Bri
 
   const isEmpty = todayCount === 0 && overdueCount === 0 && hotCount === 0;
 
-  const previewNames = Array.from(
-    new Set([...overdueRows.map((r) => r.leadName), ...todayRows.map((r) => r.leadName)])
-  ).slice(0, 3);
+  const followupNames = [
+    ...overdueRows.map((r) => r.leadName),
+    ...todayRows.map((r) => r.leadName),
+  ];
+  const nameSource =
+    followupNames.length > 0 ? followupNames : hotNameRows.map((r) => r.name);
+  const previewNames = Array.from(new Set(nameSource)).slice(0, 3);
 
   const titleParts: string[] = [];
   if (overdueCount > 0) titleParts.push(`${overdueCount} באיחור`);
