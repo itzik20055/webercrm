@@ -47,6 +47,27 @@ export function LeadAiReprocess({
   const router = useRouter();
   const [pending, start] = useTransition();
   const [lastChangeNotes, setLastChangeNotes] = useState<string | null>(null);
+  const [inUndoWindow, setInUndoWindow] = useState(() =>
+    lastReprocessedAt
+      ? Date.now() - lastReprocessedAt.getTime() < UNDO_WINDOW_MS
+      : false
+  );
+
+  useEffect(() => {
+    if (!lastReprocessedAt) {
+      setInUndoWindow(false);
+      return;
+    }
+    const remaining =
+      UNDO_WINDOW_MS - (Date.now() - lastReprocessedAt.getTime());
+    if (remaining <= 0) {
+      setInUndoWindow(false);
+      return;
+    }
+    setInUndoWindow(true);
+    const t = setTimeout(() => setInUndoWindow(false), remaining);
+    return () => clearTimeout(t);
+  }, [lastReprocessedAt]);
 
   function runReprocess() {
     start(async () => {
@@ -78,13 +99,18 @@ export function LeadAiReprocess({
       <button
         type="button"
         onClick={runReprocess}
-        disabled={pending}
+        disabled={pending || inUndoWindow}
         className="press w-full h-11 rounded-xl bg-primary text-primary-foreground font-semibold text-sm disabled:opacity-60 flex items-center justify-center gap-2"
       >
         {pending ? (
           <>
             <Loader2 className="size-4 animate-spin" />
             מעבד...
+          </>
+        ) : inUndoWindow ? (
+          <>
+            <RotateCcw className="size-4" />
+            ממתין לסיום חלון ביטול
           </>
         ) : (
           <>

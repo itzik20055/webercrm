@@ -715,6 +715,12 @@ export interface ReprocessResult {
 }
 
 /**
+ * Matches the client-side undo banner window in components/lead-ai-reprocess.tsx.
+ * Keep them in sync — if the client window ever changes, this constant must too.
+ */
+const REPROCESS_LOCK_MS = 30_000;
+
+/**
  * Runs the full conversation + profile through the AI and applies the resulting
  * field updates to the lead. Snapshots the old values for a 30s undo window.
  * Followup changes are NOT applied here — they're stashed in
@@ -723,6 +729,16 @@ export interface ReprocessResult {
 export async function reprocessLeadWithAi(leadId: string): Promise<ReprocessResult> {
   const [lead] = await db.select().from(leads).where(eq(leads.id, leadId));
   if (!lead) throw new Error("הליד לא נמצא");
+
+  if (lead.lastReprocessedAt) {
+    const sinceLast = Date.now() - lead.lastReprocessedAt.getTime();
+    if (sinceLast < REPROCESS_LOCK_MS) {
+      const remaining = Math.ceil((REPROCESS_LOCK_MS - sinceLast) / 1000);
+      throw new Error(
+        `המתן ${remaining} שניות (חלון ביטול), או בטל את העיבוד הקודם`
+      );
+    }
+  }
 
   const [allInteractions, openFollowupsRows] = await Promise.all([
     db
