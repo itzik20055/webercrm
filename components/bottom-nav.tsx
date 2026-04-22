@@ -37,7 +37,7 @@ export function BottomNav({
         {items.map(({ href, icon: Icon, label, badge }) => {
           const active =
             href === "/chat"
-              ? pathname === "/" || pathname.startsWith("/chat")
+              ? pathname.startsWith("/chat")
               : pathname.startsWith(href);
           const count = badge === "queue" ? queueCount : badge === "inbox" ? inboxCount : 0;
           const showBadge = !!badge && count > 0;
