@@ -18,13 +18,15 @@ export async function getQueueCount(): Promise<number> {
  * Drives the /inbox tab badge.
  */
 export async function getInboxCount(): Promise<number> {
-  const [pendingRow] = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(pendingCallRecordings)
-    .where(eq(pendingCallRecordings.status, "pending"));
-  const [reviewRow] = await db
-    .select({ c: sql<number>`count(*)::int` })
-    .from(leads)
-    .where(eq(leads.needsReview, true));
+  const [[pendingRow], [reviewRow]] = await Promise.all([
+    db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(pendingCallRecordings)
+      .where(eq(pendingCallRecordings.status, "pending")),
+    db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(leads)
+      .where(eq(leads.needsReview, true)),
+  ]);
   return (pendingRow?.c ?? 0) + (reviewRow?.c ?? 0);
 }
