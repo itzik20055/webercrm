@@ -1,0 +1,1 @@
+ALTER TABLE "leads" ADD COLUMN "pending_priority_suggestion" jsonb;

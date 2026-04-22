@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { db, leads, followups, interactions } from "@/db";
-import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { db, leads, followups, interactions, type Lead } from "@/db";
+import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
+import { reprocessLeadProfile } from "@/lib/ai-client";
+import { getSetting } from "@/lib/settings";
 
 async function supersedeOpenFollowups(leadId: string, exceptId?: string) {
   const cond = exceptId
@@ -595,4 +597,351 @@ export async function resolveFollowup(formData: FormData) {
   revalidatePath("/followups");
   revalidatePath("/queue");
   revalidatePath("/");
+}
+
+// --- Batch interaction logging + AI reprocess ---
+
+const batchInteractionRowSchema = z.object({
+  type: z.enum(["call_in", "call_out", "whatsapp", "email", "sms", "note"]),
+  direction: z.enum(["in", "out", "internal"]),
+  content: z.string().min(1).max(8000),
+  durationMin: z.coerce.number().int().min(0).nullish(),
+  occurredAt: z.string().nullish(),
+});
+
+/**
+ * Saves multiple interaction rows in one call. Used by the multi-message log
+ * form — the user types a stack of back-and-forth messages and we persist them
+ * as individual interactions. No AI call runs here: the user triggers reprocess
+ * separately via the "עיבוד עם AI" button on the lead page.
+ */
+export async function logInteractionsBatch(formData: FormData) {
+  const leadId = String(formData.get("leadId") ?? "");
+  if (!leadId) throw new Error("leadId missing");
+
+  const rawRows = formData.getAll("rows");
+  if (rawRows.length === 0) throw new Error("אין הודעות לשמור");
+
+  const parsed = rawRows.map((r) => {
+    try {
+      const obj = JSON.parse(String(r));
+      return batchInteractionRowSchema.parse(obj);
+    } catch {
+      throw new Error("שורת הודעה לא תקינה");
+    }
+  });
+
+  const values = parsed.map((row) => ({
+    leadId,
+    type: row.type,
+    direction: row.direction,
+    content: row.content,
+    durationMin: row.durationMin ?? null,
+    occurredAt: row.occurredAt ? new Date(row.occurredAt) : new Date(),
+  }));
+
+  await db.insert(interactions).values(values);
+
+  await db
+    .update(leads)
+    .set({
+      updatedAt: new Date(),
+      status: sql`case when ${leads.status} = 'new' then 'contacted'::lead_status else ${leads.status} end`,
+    })
+    .where(eq(leads.id, leadId));
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/");
+}
+
+/**
+ * Fields that get snapshotted before an AI reprocess and restored on undo.
+ * These are exactly the fields the reprocess prompt is allowed to change —
+ * customer-identity fields (name/phone/email/language/audience/channel/source)
+ * are user-owned and never touched.
+ */
+export interface ReprocessSnapshot {
+  numAdults: number | null;
+  numChildren: number | null;
+  agesChildren: string | null;
+  datesInterest: string | null;
+  roomTypeInterest: string | null;
+  budgetSignal: Lead["budgetSignal"];
+  interestTags: string[];
+  whatSpokeToThem: string | null;
+  objections: string | null;
+  status: Lead["status"];
+  priority: Lead["priority"];
+}
+
+export type PendingFollowupSuggestion =
+  | {
+      action: "reschedule";
+      dueAt: string;
+      reason: string | null;
+      reasoning: string;
+    }
+  | {
+      action: "cancel";
+      reasoning: string;
+    };
+
+export type PendingPrioritySuggestion = {
+  from: Lead["priority"];
+  to: Lead["priority"];
+};
+
+function buildSnapshot(lead: Lead): ReprocessSnapshot {
+  return {
+    numAdults: lead.numAdults,
+    numChildren: lead.numChildren,
+    agesChildren: lead.agesChildren,
+    datesInterest: lead.datesInterest,
+    roomTypeInterest: lead.roomTypeInterest,
+    budgetSignal: lead.budgetSignal,
+    interestTags: lead.interestTags ?? [],
+    whatSpokeToThem: lead.whatSpokeToThem,
+    objections: lead.objections,
+    status: lead.status,
+    priority: lead.priority,
+  };
+}
+
+export interface ReprocessResult {
+  ok: true;
+  changeNotes: string;
+  followupSuggestion: PendingFollowupSuggestion | null;
+  prioritySuggestion: PendingPrioritySuggestion | null;
+}
+
+/**
+ * Runs the full conversation + profile through the AI and applies the resulting
+ * field updates to the lead. Snapshots the old values for a 30s undo window.
+ * Followup changes are NOT applied here — they're stashed in
+ * pendingFollowupSuggestion for the user to approve separately on the lead page.
+ */
+export async function reprocessLeadWithAi(leadId: string): Promise<ReprocessResult> {
+  const [lead] = await db.select().from(leads).where(eq(leads.id, leadId));
+  if (!lead) throw new Error("הליד לא נמצא");
+
+  const [allInteractions, openFollowupsRows] = await Promise.all([
+    db
+      .select()
+      .from(interactions)
+      .where(eq(interactions.leadId, leadId))
+      .orderBy(asc(interactions.occurredAt)),
+    db
+      .select()
+      .from(followups)
+      .where(and(eq(followups.leadId, leadId), isNull(followups.completedAt)))
+      .orderBy(asc(followups.dueAt))
+      .limit(1),
+  ]);
+
+  if (allInteractions.length === 0) {
+    throw new Error("אין שיחות לעבד — תעד קודם");
+  }
+
+  const ourName = (await getSetting("whatsapp_display_name")) ?? "איציק";
+  const { profile } = await reprocessLeadProfile({
+    lead,
+    interactions: allInteractions,
+    openFollowup: openFollowupsRows[0]
+      ? { dueAt: openFollowupsRows[0].dueAt, reason: openFollowupsRows[0].reason }
+      : null,
+    ourName,
+  });
+
+  const snapshot = buildSnapshot(lead);
+
+  let followupSuggestion: PendingFollowupSuggestion | null = null;
+  if (profile.followupAction === "reschedule" && profile.followupHoursFromNow != null) {
+    const due = new Date(
+      Date.now() + profile.followupHoursFromNow * 60 * 60 * 1000
+    );
+    followupSuggestion = {
+      action: "reschedule",
+      dueAt: due.toISOString(),
+      reason: profile.followupReason,
+      reasoning: profile.followupReasoning,
+    };
+  } else if (profile.followupAction === "cancel") {
+    followupSuggestion = {
+      action: "cancel",
+      reasoning: profile.followupReasoning,
+    };
+  }
+
+  const prioritySuggestion: PendingPrioritySuggestion | null =
+    profile.priority !== lead.priority
+      ? { from: lead.priority, to: profile.priority }
+      : null;
+
+  await db
+    .update(leads)
+    .set({
+      numAdults: profile.numAdults,
+      numChildren: profile.numChildren,
+      agesChildren: profile.agesChildren,
+      datesInterest: profile.datesInterest,
+      roomTypeInterest: profile.roomTypeInterest,
+      budgetSignal: profile.budgetSignal,
+      interestTags: profile.interestTags,
+      whatSpokeToThem: profile.whatSpokeToThem,
+      objections: profile.objections,
+      status: profile.status,
+      lastReprocessSnapshot: snapshot,
+      lastReprocessedAt: new Date(),
+      pendingFollowupSuggestion: followupSuggestion,
+      pendingPrioritySuggestion: prioritySuggestion,
+      updatedAt: new Date(),
+    })
+    .where(eq(leads.id, leadId));
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/");
+
+  return {
+    ok: true,
+    changeNotes: profile.changeNotes,
+    followupSuggestion,
+    prioritySuggestion,
+  };
+}
+
+/**
+ * Restores the snapshot captured by the last reprocess. Clears the snapshot +
+ * the pending followup suggestion. No-op if no snapshot exists (stale click).
+ */
+export async function undoLastReprocess(leadId: string): Promise<void> {
+  const [lead] = await db
+    .select({
+      lastReprocessSnapshot: leads.lastReprocessSnapshot,
+    })
+    .from(leads)
+    .where(eq(leads.id, leadId));
+
+  if (!lead?.lastReprocessSnapshot) return;
+
+  const snap = lead.lastReprocessSnapshot as ReprocessSnapshot;
+  await db
+    .update(leads)
+    .set({
+      numAdults: snap.numAdults,
+      numChildren: snap.numChildren,
+      agesChildren: snap.agesChildren,
+      datesInterest: snap.datesInterest,
+      roomTypeInterest: snap.roomTypeInterest,
+      budgetSignal: snap.budgetSignal,
+      interestTags: snap.interestTags ?? [],
+      whatSpokeToThem: snap.whatSpokeToThem,
+      objections: snap.objections,
+      status: snap.status,
+      priority: snap.priority,
+      lastReprocessSnapshot: null,
+      lastReprocessedAt: null,
+      pendingFollowupSuggestion: null,
+      pendingPrioritySuggestion: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(leads.id, leadId));
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/");
+}
+
+/**
+ * Approves the AI's followup suggestion: either schedules a new followup at
+ * the proposed time (reschedule) or marks all open followups complete
+ * (cancel). Either way, the pending suggestion is cleared.
+ */
+export async function applyFollowupSuggestion(leadId: string): Promise<void> {
+  const [lead] = await db
+    .select({ pendingFollowupSuggestion: leads.pendingFollowupSuggestion })
+    .from(leads)
+    .where(eq(leads.id, leadId));
+  if (!lead?.pendingFollowupSuggestion) return;
+
+  const sug = lead.pendingFollowupSuggestion as PendingFollowupSuggestion;
+
+  if (sug.action === "reschedule") {
+    const due = new Date(sug.dueAt);
+    if (isNaN(due.getTime())) throw new Error("תאריך פולואפ לא תקין");
+    await supersedeOpenFollowups(leadId);
+    await db.insert(followups).values({
+      leadId,
+      dueAt: due,
+      reason: sug.reason ?? null,
+    });
+    await db
+      .update(leads)
+      .set({
+        nextFollowupAt: due,
+        followupCompletedAt: null,
+        pendingFollowupSuggestion: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(leads.id, leadId));
+  } else {
+    await supersedeOpenFollowups(leadId);
+    await db
+      .update(leads)
+      .set({
+        nextFollowupAt: null,
+        followupCompletedAt: new Date(),
+        pendingFollowupSuggestion: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(leads.id, leadId));
+  }
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/followups");
+  revalidatePath("/queue");
+  revalidatePath("/");
+}
+
+export async function dismissFollowupSuggestion(leadId: string): Promise<void> {
+  await db
+    .update(leads)
+    .set({ pendingFollowupSuggestion: null, updatedAt: new Date() })
+    .where(eq(leads.id, leadId));
+  revalidatePath(`/leads/${leadId}`);
+}
+
+/**
+ * Approves the AI's priority suggestion: flips the lead's priority to the
+ * proposed value and clears the suggestion.
+ */
+export async function applyPrioritySuggestion(leadId: string): Promise<void> {
+  const [lead] = await db
+    .select({ pendingPrioritySuggestion: leads.pendingPrioritySuggestion })
+    .from(leads)
+    .where(eq(leads.id, leadId));
+  if (!lead?.pendingPrioritySuggestion) return;
+
+  const sug = lead.pendingPrioritySuggestion as PendingPrioritySuggestion;
+
+  await db
+    .update(leads)
+    .set({
+      priority: sug.to,
+      pendingPrioritySuggestion: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(leads.id, leadId));
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/");
+}
+
+export async function dismissPrioritySuggestion(leadId: string): Promise<void> {
+  await db
+    .update(leads)
+    .set({ pendingPrioritySuggestion: null, updatedAt: new Date() })
+    .where(eq(leads.id, leadId));
+  revalidatePath(`/leads/${leadId}`);
 }

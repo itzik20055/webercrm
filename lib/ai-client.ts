@@ -675,6 +675,256 @@ export async function extractLeadFromChat(
   return { lead: result!, durationMs: Date.now() - start };
 }
 
+/**
+ * Schema for reprocessing an *existing* lead's profile from the full conversation
+ * history. Unlike ExtractedLeadSchema, this one omits customer-identity fields
+ * (name, phone, email, language, audience) — those are user-owned and the AI
+ * must not rewrite them — and replaces suggestedFollowupHours with an explicit
+ * action so the UI can offer "reschedule / cancel / keep" as a separate
+ * approval step rather than silently overwriting the schedule.
+ */
+const ReprocessProfileSchema = z.object({
+  numAdults: z.number().int().nullable(),
+  numChildren: z.number().int().nullable(),
+  agesChildren: z.string().nullable(),
+  datesInterest: z.string().nullable(),
+  roomTypeInterest: z.string().nullable(),
+  budgetSignal: z.enum(["low", "mid", "high"]).nullable(),
+  interestTags: z.array(
+    z.enum([
+      "hotel",
+      "food",
+      "trips",
+      "spa",
+      "pool",
+      "minyan",
+      "kids",
+      "shabbat",
+      "flights",
+      "views",
+    ])
+  ),
+  whatSpokeToThem: z.string().nullable(),
+  objections: z.string().nullable(),
+  status: z.enum([
+    "new",
+    "contacted",
+    "interested",
+    "quoted",
+    "closing",
+    "booked",
+    "lost",
+  ]),
+  priority: z.enum(["hot", "warm", "cold"]),
+  summary: z.string(),
+  followupAction: z
+    .enum(["keep", "reschedule", "cancel"])
+    .describe(
+      "keep = current followup is still correct; reschedule = propose new time; cancel = no followup needed (lead is booked/lost or explicitly asked to be left alone)."
+    ),
+  followupHoursFromNow: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      "Hours from NOW until next followup. Required when action='reschedule'. null otherwise."
+    ),
+  followupReason: z
+    .string()
+    .nullable()
+    .describe("קצרה בעברית — מה מחכים לו / מה לבדוק בפולואפ. null אם cancel."),
+  followupReasoning: z
+    .string()
+    .describe(
+      "ההיגיון מאחורי הבחירה: למה keep/reschedule/cancel, וכמה שעות אם reschedule."
+    ),
+  changeNotes: z
+    .string()
+    .describe(
+      "משפט אחד בעברית שמסכם מה השתנה מהפרופיל הקודם לפרופיל הזה — זה מוצג למשתמש אחרי העיבוד."
+    ),
+});
+
+export type ReprocessedProfile = z.infer<typeof ReprocessProfileSchema>;
+
+export interface ReprocessInput {
+  lead: Lead;
+  interactions: Interaction[];
+  openFollowup: { dueAt: Date; reason: string | null } | null;
+  ourName: string;
+}
+
+export interface ReprocessOutput {
+  profile: ReprocessedProfile;
+  durationMs: number;
+}
+
+/**
+ * Re-analyses an existing lead's full interaction history and returns an
+ * updated profile + a followup recommendation. Use this when the user added
+ * new logs (or edited KB/rules) and wants the AI to refresh everything it
+ * previously inferred. Customer-identity fields stay frozen.
+ */
+export async function reprocessLeadProfile(
+  input: ReprocessInput
+): Promise<ReprocessOutput> {
+  ensureGatewayKey();
+  const start = Date.now();
+
+  // Build a synthetic transcript from the ordered interactions so the AI can
+  // read the conversation chronologically. "Me" = salesperson, "[NAME]" =
+  // customer, matching the existing anonymization conventions.
+  const chronological = [...input.interactions].sort(
+    (a, b) => a.occurredAt.getTime() - b.occurredAt.getTime()
+  );
+  const transcript = chronological
+    .map((i) => {
+      const who =
+        i.direction === "out"
+          ? "Me"
+          : i.direction === "in"
+            ? "[NAME]"
+            : "Internal";
+      const ts = new Date(i.occurredAt).toISOString();
+      const typeLabel = i.type;
+      return `--- ${typeLabel} · ${ts} · ${who} ---\n${i.content}`;
+    })
+    .join("\n\n");
+
+  const currentProfile = [
+    `סטטוס נוכחי: ${input.lead.status}`,
+    `עדיפות נוכחית: ${input.lead.priority}`,
+    input.lead.numAdults != null ? `מבוגרים: ${input.lead.numAdults}` : null,
+    input.lead.numChildren != null ? `ילדים: ${input.lead.numChildren}` : null,
+    input.lead.agesChildren ? `גילי ילדים: ${input.lead.agesChildren}` : null,
+    input.lead.datesInterest ? `תאריכים: ${input.lead.datesInterest}` : null,
+    input.lead.roomTypeInterest ? `חדר: ${input.lead.roomTypeInterest}` : null,
+    input.lead.budgetSignal ? `תקציב: ${input.lead.budgetSignal}` : null,
+    input.lead.interestTags?.length
+      ? `תגיות עניין: ${input.lead.interestTags.join(", ")}`
+      : null,
+    input.lead.whatSpokeToThem
+      ? `מה תפס אותו (עד כה): ${input.lead.whatSpokeToThem}`
+      : null,
+    input.lead.objections ? `התנגדויות (עד כה): ${input.lead.objections}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const followupLine = input.openFollowup
+    ? `פולואפ פתוח: ${input.openFollowup.dueAt.toISOString()}${
+        input.openFollowup.reason ? ` · סיבה: ${input.openFollowup.reason}` : ""
+      }`
+    : "אין פולואפ פתוח.";
+
+  const knownNames = [input.lead.name, input.ourName].filter(
+    (n): n is string => !!n
+  );
+  const { anonymized, placeholderMap } = anonymize(transcript, knownNames);
+  const knowledge = await loadKnowledgeContext();
+  const knowledgeBlock = knowledge
+    ? `\n\n--- ידע מובנה על המוצר ---\n\n${knowledge}\n\n--- סוף ידע ---\n`
+    : "";
+
+  const systemPrompt = `אתה מנתח לידים של Weber Tours — נופש כשר באלפים האוסטריים בסנט אנטון. אתה מקבל ליד קיים + כל היסטוריית השיחות איתו, ומייצר פרופיל מעודכן.${knowledgeBlock}
+
+השיחה מאונונמת: שם הלקוח מופיע כ-[NAME], טלפונים כ-[PHONE_1], אימיילים כ-[EMAIL_1].
+
+כללים נוקשים:
+1. **אל תמציא שום פרט.** אם משהו לא נאמר במפורש בשיחה → החזר null או רשימה ריקה.
+2. **אל תשמור שדה קיים אם השיחה סותרת אותו.** אם הפרופיל הנוכחי אומר "3 מבוגרים" והלקוח בהודעה האחרונה אמר "בעצם נהיה 4" → עדכן ל-4.
+3. **אל תמחוק שדה קיים בלי סיבה.** אם אין אזכור חדש אבל השדה הנוכחי התחבר מהשיחה הישנה — השאר אותו. שנה רק כשיש ראיה חדשה.
+4. **טקסט חופשי (whatSpokeToThem, objections, summary, changeNotes, followupReason, followupReasoning):** עברית בלבד, משפטים קצרים ומדויקים, בלי תווי escape כמו "\\n".
+5. **סטטוס:** שים לב לשינויים מהשיחה החדשה.
+   - "new" → "contacted" ברגע שהיה כל דו-שיח.
+   - "contacted" → "interested" אם התחיל לשאול שאלות אמיתיות.
+   - "interested" → "quoted" אם שלחת מחיר.
+   - "quoted" → "closing" אם ביקש לקבוע.
+   - "closing" → "booked" רק אם אישר הזמנה.
+   - לכל שלב יכול לחזור אחורה אם הלקוח התקרר/התלונן/אמר "צריך לחשוב" אחרי שהיה מתקדם.
+6. **עדיפות (priority):**
+   - "hot" — שואל מחירים, ביקש פרטים ספציפיים, קיבע מועד לחזור.
+   - "warm" — עניין כללי.
+   - "cold" — לא הגיב הרבה זמן / דחה.
+   - שים לב להודעה האחרונה: אם היה חם והוא התקרר → הורד. אם היה פושר ונלהב פתאום → העלה.
+7. **תגיות עניין (interestTags):** שמור את הקיימות + הוסף חדשות אם הוזכרו. אל תסיר תגית ישנה רק כי לא חזרה בהודעה הזו.
+8. **המלצת פולואפ (followupAction):**
+   - "keep" — הפולואפ הקיים עדיין נכון. שים null ב-followupHoursFromNow.
+   - "reschedule" — הזמן הנכון השתנה (למשל: הלקוח שלח הודעה ואמר "תחזור אליי מחר בערב" → הזז למחר 20:00; או "אני בחופש, תחזור בעוד שבוע"). חובה למלא followupHoursFromNow.
+   - "cancel" — הליד סגור (booked/lost) או ביקש לא לחזור אליו.
+9. **שעות פולואפ נמדדות מעכשיו** (מהזמן שאתה רץ).
+10. **changeNotes:** משפט אחד באיזה שדות עדכנת ולמה. לדוגמה: "עדכנתי לסטטוס interested כי התחיל לשאול על מחירים והוספתי minyan לתגיות עניין".
+
+שדות שלא תחליט עליהם (הם בבעלות המשתמש, לא תשנה אותם): שם, טלפון, אימייל, שפה, קהל, ערוץ ראשון, מקור.`;
+
+  const userPrompt = `הזמן הנוכחי (לחישוב followupHoursFromNow): ${new Date().toISOString()}
+
+--- פרופיל נוכחי של הליד ---
+שם הלקוח: [NAME]
+שפה: ${input.lead.language}
+קהל: ${input.lead.audience}
+${currentProfile}
+
+${followupLine}
+
+--- כל היסטוריית השיחות (מוקדם → מאוחר, מאונונם) ---
+
+${anonymized}
+
+--- סוף היסטוריה ---
+
+הפק פרופיל מעודכן לפי הסכמה. שים לב במיוחד להודעות האחרונות: הן מה שהכי עשוי לשנות את התמונה.`;
+
+  let result: ReprocessedProfile | undefined;
+  let error: string | undefined;
+  try {
+    const { object } = await generateObject({
+      model: MODELS.extract,
+      schema: ReprocessProfileSchema,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    });
+    result = object;
+  } catch (e) {
+    error = e instanceof Error ? e.message : String(e);
+    throw e;
+  } finally {
+    const durationMs = Date.now() - start;
+    await db
+      .insert(aiAuditLog)
+      .values({
+        operation: "reprocess_lead_profile",
+        model: MODELS.extract,
+        inputAnonymized: `${currentProfile}\n${followupLine}\n---\n${anonymized}`,
+        output: result ? JSON.stringify(result) : null,
+        placeholderMap,
+        leadId: input.lead.id,
+        durationMs,
+        error: error ?? null,
+      })
+      .catch(() => {});
+  }
+
+  if (result) {
+    const clean = (s: string) =>
+      deanonymize(s, placeholderMap)
+        .replace(/\\r\\n|\\n|\\r/g, "\n")
+        .replace(/\\t/g, " ")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    if (result.whatSpokeToThem) result.whatSpokeToThem = clean(result.whatSpokeToThem);
+    if (result.objections) result.objections = clean(result.objections);
+    result.summary = clean(result.summary);
+    result.changeNotes = clean(result.changeNotes);
+    if (result.followupReason) result.followupReason = clean(result.followupReason);
+    result.followupReasoning = clean(result.followupReasoning);
+  }
+
+  return { profile: result!, durationMs: Date.now() - start };
+}
+
 export interface CustomerQAInput {
   question: string;
   audience: Lead["audience"];

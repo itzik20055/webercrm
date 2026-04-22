@@ -35,6 +35,11 @@ import { CopyChip } from "@/components/copy-chip";
 import { DraftCard } from "@/components/draft-card";
 import { DeleteLeadButton } from "@/components/delete-lead-button";
 import { LeadQuickActions } from "@/components/lead-action-sheets";
+import { LeadAiReprocess } from "@/components/lead-ai-reprocess";
+import type {
+  PendingFollowupSuggestion,
+  PendingPrioritySuggestion,
+} from "@/app/(app)/leads/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -135,6 +140,17 @@ export default async function LeadPage({
           datesInterest={lead.datesInterest}
           whatSpokeToThem={lead.whatSpokeToThem}
           interestTags={lead.interestTags}
+        />
+
+        <LeadAiReprocess
+          leadId={lead.id}
+          lastReprocessedAt={lead.lastReprocessedAt}
+          followupSuggestion={
+            (lead.pendingFollowupSuggestion as PendingFollowupSuggestion | null) ?? null
+          }
+          prioritySuggestion={
+            (lead.pendingPrioritySuggestion as PendingPrioritySuggestion | null) ?? null
+          }
         />
 
         <div className="flex flex-wrap gap-1.5 text-xs">

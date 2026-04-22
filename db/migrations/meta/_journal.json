@@ -50,6 +50,20 @@
       "when": 1776785576886,
       "tag": "0006_dazzling_jane_foster",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776798056179,
+      "tag": "0007_free_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776815412914,
+      "tag": "0008_priority_suggestion",
+      "breakpoints": true
     }
   ]
 }

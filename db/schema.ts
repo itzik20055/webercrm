@@ -101,6 +101,28 @@ export const leads = pgTable(
     notes: text(),
     needsReview: boolean().notNull().default(false),
     pendingExtraction: jsonb(),
+    /**
+     * Snapshot of mutable lead fields taken right before the last AI reprocess,
+     * so the user can hit "Undo" within a short window if the AI's edits were
+     * worse than what we had. Cleared after the undo window passes (or on undo).
+     */
+    lastReprocessSnapshot: jsonb(),
+    lastReprocessedAt: timestamp({ withTimezone: true }),
+    /**
+     * AI's proposal for what to do with the open followup after a reprocess.
+     * Stored separately from field updates because moving a followup is easy
+     * to miss — the user must explicitly approve. Shape:
+     *   { action: "reschedule", dueAt: ISO, reason?: string }
+     *   { action: "cancel", reason?: string }
+     */
+    pendingFollowupSuggestion: jsonb(),
+    /**
+     * AI's proposal for changing priority. Priority is stored separately from
+     * other field updates because the operator may have manually pinned a lead
+     * as "cold" and the AI shouldn't silently flip it back to "hot". Shape:
+     *   { from: "hot" | "warm" | "cold", to: "hot" | "warm" | "cold" }
+     */
+    pendingPrioritySuggestion: jsonb(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },

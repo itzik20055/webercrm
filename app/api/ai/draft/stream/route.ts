@@ -65,6 +65,7 @@ export async function POST(req: Request) {
       { role: "system", content: prompts.systemPrompt },
       { role: "user", content: prompts.userPrompt },
     ],
+    abortSignal: req.signal,
     onFinish: async (event) => {
       await logDraftReply({
         scenario: parsed.scenario,
