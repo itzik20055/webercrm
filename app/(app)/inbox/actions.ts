@@ -10,6 +10,7 @@ import {
   followups,
   interactions,
   pendingCallRecordings,
+  pendingWhatsAppImports,
 } from "@/db";
 import type { ExtractedLead } from "@/lib/ai-client";
 
@@ -425,6 +426,19 @@ export async function dismissCallRecording(pendingId: string) {
     .update(pendingCallRecordings)
     .set({ status: "dismissed", resolvedAt: new Date() })
     .where(eq(pendingCallRecordings.id, pendingId));
+  revalidatePath("/inbox");
+  revalidatePath("/");
+}
+
+export async function dismissWhatsAppImport(importId: string) {
+  await db
+    .update(pendingWhatsAppImports)
+    .set({
+      status: "dismissed",
+      resolvedAt: new Date(),
+      fileBytes: Buffer.alloc(0),
+    })
+    .where(eq(pendingWhatsAppImports.id, importId));
   revalidatePath("/inbox");
   revalidatePath("/");
 }

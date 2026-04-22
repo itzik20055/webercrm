@@ -1,5 +1,11 @@
-import { and, eq, isNull, lte, sql } from "drizzle-orm";
-import { db, followups, leads, pendingCallRecordings } from "@/db";
+import { and, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import {
+  db,
+  followups,
+  leads,
+  pendingCallRecordings,
+  pendingWhatsAppImports,
+} from "@/db";
 
 /**
  * Followups due now or overdue. Drives the /queue tab badge.
@@ -18,7 +24,7 @@ export async function getQueueCount(): Promise<number> {
  * Drives the /inbox tab badge.
  */
 export async function getInboxCount(): Promise<number> {
-  const [[pendingRow], [reviewRow]] = await Promise.all([
+  const [[pendingRow], [reviewRow], [waRow]] = await Promise.all([
     db
       .select({ c: sql<number>`count(*)::int` })
       .from(pendingCallRecordings)
@@ -27,6 +33,17 @@ export async function getInboxCount(): Promise<number> {
       .select({ c: sql<number>`count(*)::int` })
       .from(leads)
       .where(eq(leads.needsReview, true)),
+    db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(pendingWhatsAppImports)
+      .where(
+        inArray(pendingWhatsAppImports.status, [
+          "pending",
+          "processing",
+          "done",
+          "failed",
+        ])
+      ),
   ]);
-  return (pendingRow?.c ?? 0) + (reviewRow?.c ?? 0);
+  return (pendingRow?.c ?? 0) + (reviewRow?.c ?? 0) + (waRow?.c ?? 0);
 }

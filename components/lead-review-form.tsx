@@ -67,13 +67,13 @@ export interface ExistingMatch {
 export type ReviewMode =
   | {
       kind: "import";
+      pendingImportId: string;
       inferredName: string | null;
       inferredPhone: string | null;
       existingMatches: ExistingMatch[];
       audioStats: { total: number; transcribed: number; skipped: number };
       chatTranscript: string;
       messageCount: number;
-      onCancel: () => void;
     }
   | {
       kind: "approve";
@@ -496,11 +496,18 @@ export function LeadReviewForm({
       )}
 
       {mode.kind === "import" && (
-        <input
-          type="hidden"
-          name="chatTranscript"
-          value={mode.chatTranscript}
-        />
+        <>
+          <input
+            type="hidden"
+            name="chatTranscript"
+            value={mode.chatTranscript}
+          />
+          <input
+            type="hidden"
+            name="pendingImportId"
+            value={mode.pendingImportId}
+          />
+        </>
       )}
 
       {mode.kind === "import" && (
@@ -552,23 +559,12 @@ export function LeadReviewForm({
       )}
 
       <div className="sticky bottom-[calc(env(safe-area-inset-bottom)+64px)] -mx-4 px-4 py-3 bg-background/95 backdrop-blur-sm border-t border-border/60 flex gap-2">
-        {mode.kind === "import" ? (
-          <button
-            type="button"
-            onClick={mode.onCancel}
-            disabled={pending}
-            className="press h-12 px-4 rounded-full border border-border font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            בטל
-          </button>
-        ) : (
-          <Link
-            href="/inbox"
-            className="press h-12 px-4 rounded-full border border-border font-medium flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          >
-            חזרה
-          </Link>
-        )}
+        <Link
+          href="/inbox"
+          className="press h-12 px-4 rounded-full border border-border font-medium flex items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          חזרה
+        </Link>
         <button
           type="submit"
           disabled={pending || (identityRequired && (!name || !phone))}

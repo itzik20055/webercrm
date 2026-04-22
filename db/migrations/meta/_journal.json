@@ -71,6 +71,13 @@
       "when": 1776873356301,
       "tag": "0009_dark_liz_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1776900304501,
+      "tag": "0010_whatsapp_imports_queue",
+      "breakpoints": true
     }
   ]
 }

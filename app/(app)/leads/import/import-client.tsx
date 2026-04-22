@@ -1,39 +1,31 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Upload, Loader2, AlertCircle } from "lucide-react";
 import { LANGUAGE_LABELS } from "@/db/schema";
-import {
-  LeadReviewForm,
-  type ExtractedLeadData,
-  type ExistingMatch,
-} from "@/components/lead-review-form";
 
-interface ImportResponse {
+interface EnqueueResponse {
   ok: boolean;
-  inferredLeadName: string | null;
-  inferredPhones: string[];
-  audioStats: { total: number; transcribed: number; skipped: number };
-  messageCount: number;
-  firstMessageAt: string;
-  lastMessageAt: string;
-  lead: ExtractedLeadData;
-  renderedChat: string;
-  existingMatches: ExistingMatch[];
+  id: string;
+  status: "pending" | "processing" | "done" | "failed" | "merged" | "dismissed";
+  duplicate?: boolean;
+  error?: string;
 }
 
 export function ImportClient({ myName }: { myName: string }) {
+  const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [language, setLanguage] = useState<"he" | "en" | "yi">("he");
-  const [phase, setPhase] = useState<"idle" | "uploading" | "review">("idle");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ImportResponse | null>(null);
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
     setError(null);
-    setPhase("uploading");
+    setSubmitting(true);
 
     const fd = new FormData();
     fd.append("file", file);
@@ -44,51 +36,20 @@ export function ImportClient({ myName }: { myName: string }) {
         method: "POST",
         body: fd,
       });
-      const json = await res.json();
+      const json = (await res.json()) as EnqueueResponse;
       if (!res.ok || !json.ok) {
-        throw new Error(json.error ?? "שגיאה בעיבוד הקובץ");
+        throw new Error(json.error ?? "שגיאה בהעלאה");
       }
-      setResult(json as ImportResponse);
-      setPhase("review");
+      if (json.duplicate) {
+        toast.success("הקובץ כבר הועלה — מפנה אותך לסקירה");
+      } else {
+        toast.success("נקלט! העיבוד רץ ברקע — תראה התראה ב-Inbox");
+      }
+      router.push("/inbox");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      setPhase("idle");
+      setSubmitting(false);
     }
-  }
-
-  if (phase === "uploading") {
-    return (
-      <div className="rounded-2xl border bg-card p-6 text-center space-y-3 shadow-soft">
-        <Loader2 className="size-8 mx-auto animate-spin text-primary" />
-        <div className="font-medium">מעבד את השיחה...</div>
-        <div className="text-sm text-muted-foreground">
-          מתמלל הודעות קוליות ומחלץ פרטים. זה עשוי לקחת 10-60 שניות תלוי בכמות
-          ההודעות הקוליות.
-        </div>
-      </div>
-    );
-  }
-
-  if (phase === "review" && result) {
-    return (
-      <LeadReviewForm
-        extracted={result.lead}
-        mode={{
-          kind: "import",
-          inferredName: result.inferredLeadName,
-          inferredPhone: result.inferredPhones[0] ?? null,
-          existingMatches: result.existingMatches,
-          audioStats: result.audioStats,
-          chatTranscript: result.renderedChat,
-          messageCount: result.messageCount,
-          onCancel: () => {
-            setResult(null);
-            setPhase("idle");
-            setError(null);
-          },
-        }}
-      />
-    );
   }
 
   return (
@@ -105,6 +66,7 @@ export function ImportClient({ myName }: { myName: string }) {
             accept=".zip,.txt"
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="sr-only"
+            disabled={submitting}
           />
           <div className="text-center space-y-1">
             <Upload className="size-6 mx-auto text-muted-foreground" />
@@ -112,7 +74,7 @@ export function ImportClient({ myName }: { myName: string }) {
               {file ? file.name : "בחר קובץ ZIP מוואטסאפ"}
             </div>
             <div className="text-xs text-muted-foreground">
-              .zip (כולל מדיה) או .txt
+              .zip (כולל מדיה) או .txt · עד 25MB
             </div>
           </div>
         </label>
@@ -127,6 +89,7 @@ export function ImportClient({ myName }: { myName: string }) {
                 key={l}
                 type="button"
                 onClick={() => setLanguage(l)}
+                disabled={submitting}
                 aria-pressed={language === l}
                 className={
                   "press h-11 rounded-lg border text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary " +
@@ -155,11 +118,16 @@ export function ImportClient({ myName }: { myName: string }) {
 
       <button
         type="submit"
-        disabled={!file}
-        className="press w-full h-12 rounded-full bg-primary text-primary-foreground font-semibold disabled:opacity-50 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+        disabled={!file || submitting}
+        className="press w-full h-12 rounded-full bg-primary text-primary-foreground font-semibold disabled:opacity-50 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 flex items-center justify-center gap-2"
       >
-        עבד עם AI
+        {submitting && <Loader2 className="size-4 animate-spin" />}
+        {submitting ? "שולח..." : "שלח לעיבוד"}
       </button>
+
+      <p className="text-xs text-muted-foreground text-center">
+        העיבוד רץ ברקע. תמצא את הליד ב-Inbox תוך דקה, מוכן לאישור.
+      </p>
     </form>
   );
 }

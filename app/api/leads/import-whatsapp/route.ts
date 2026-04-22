@@ -1,13 +1,17 @@
-import { NextResponse } from "next/server";
-import { importWhatsAppExport } from "@/lib/whatsapp-import";
-import { extractLeadFromChat } from "@/lib/ai-client";
+import { NextResponse, after } from "next/server";
+import { createHash } from "node:crypto";
+import { db, pendingWhatsAppImports } from "@/db";
+import { eq } from "drizzle-orm";
 import { getSetting } from "@/lib/settings";
-import { db, leads } from "@/db";
-import { ilike, desc, or, sql } from "drizzle-orm";
-import { phoneTail } from "@/lib/phone";
+import { processOne } from "@/lib/whatsapp-import-worker";
 
 export const runtime = "nodejs";
+// Keep the function alive long enough for the background worker to finish
+// (typical WA chat with ~20 voice notes is 30-90s). If the function exits
+// sooner the cron safety net will pick the row up within 1 minute.
 export const maxDuration = 300;
+
+const MAX_BYTES = 25 * 1024 * 1024;
 
 export async function POST(req: Request) {
   try {
@@ -24,82 +28,91 @@ export async function POST(req: Request) {
 
     const form = await req.formData();
     const file = form.get("file");
-    const language = (form.get("language") as "he" | "en" | "yi" | null) ?? undefined;
+    const language = (form.get("language") as "he" | "en" | "yi" | null) ?? null;
 
     if (!(file instanceof File)) {
       return NextResponse.json({ error: "לא הועלה קובץ." }, { status: 400 });
     }
-
-    const buffer = await file.arrayBuffer();
-    const isZip = file.name.toLowerCase().endsWith(".zip") ||
-      file.type === "application/zip" ||
-      file.type === "application/x-zip-compressed";
-
-    const imported = await importWhatsAppExport(buffer, {
-      isZip,
-      myName,
-      language,
-      originalFilename: file.name,
-    });
-
-    if (imported.chat.messages.length === 0) {
+    if (file.size > MAX_BYTES) {
       return NextResponse.json(
-        { error: "לא זוהו הודעות בקובץ. ייתכן שהפורמט לא נתמך." },
-        { status: 400 }
+        { error: "הקובץ גדול מדי (מקסימום 25MB)." },
+        { status: 413 }
       );
     }
 
-    const extracted = await extractLeadFromChat({
-      chatText: imported.renderedChat,
-      leadName: imported.inferredLeadName,
-      ourName: myName,
-    });
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const contentHash = createHash("sha256").update(bytes).digest("hex");
+    const isZip =
+      file.name.toLowerCase().endsWith(".zip") ||
+      file.type === "application/zip" ||
+      file.type === "application/x-zip-compressed";
 
-    // Find potentially matching existing leads by name (fuzzy) OR by phone tail.
-    // We compare the last 9 digits of phone numbers, ignoring formatting (+972 vs 05).
-    const conds = [];
-    if (imported.inferredLeadName) {
-      conds.push(ilike(leads.name, `%${imported.inferredLeadName}%`));
+    // Idempotency: if the exact same file was uploaded before we reuse that
+    // row rather than burning tokens on a duplicate. UNIQUE index on
+    // content_hash enforces this even if two uploads race.
+    const [existing] = await db
+      .select({
+        id: pendingWhatsAppImports.id,
+        status: pendingWhatsAppImports.status,
+      })
+      .from(pendingWhatsAppImports)
+      .where(eq(pendingWhatsAppImports.contentHash, contentHash));
+
+    if (existing) {
+      return NextResponse.json({
+        ok: true,
+        id: existing.id,
+        status: existing.status,
+        duplicate: true,
+      });
     }
-    for (const phone of imported.inferredPhones) {
-      const tail = phoneTail(phone);
-      if (tail.length >= 7) {
-        conds.push(sql`right(regexp_replace(${leads.phone}, '\\D', '', 'g'), 9) = ${tail}`);
+
+    const [inserted] = await db
+      .insert(pendingWhatsAppImports)
+      .values({
+        contentHash,
+        originalFilename: file.name,
+        fileBytes: bytes,
+        isZip,
+        language,
+      })
+      .onConflictDoNothing({ target: pendingWhatsAppImports.contentHash })
+      .returning({ id: pendingWhatsAppImports.id });
+
+    // If onConflictDoNothing skipped (another concurrent upload won), look up
+    // the winning row and return it.
+    let id = inserted?.id;
+    if (!id) {
+      const [row] = await db
+        .select({ id: pendingWhatsAppImports.id })
+        .from(pendingWhatsAppImports)
+        .where(eq(pendingWhatsAppImports.contentHash, contentHash));
+      id = row?.id;
+    }
+    if (!id) {
+      throw new Error("לא הצלחנו לרשום את הייבוא. נסה שוב.");
+    }
+
+    // Fire-and-forget the worker — processing kicks off immediately so the
+    // user sees the card ready in the inbox within seconds/a minute. If the
+    // serverless function dies before the worker finishes, the cron safety
+    // net picks it up within 1 min.
+    const finalId = id;
+    after(async () => {
+      try {
+        await processOne({ id: finalId });
+      } catch (e) {
+        console.error("[whatsapp-import] background worker crashed", finalId, e);
       }
-    }
-
-    const matches =
-      conds.length > 0
-        ? await db
-            .select({
-              id: leads.id,
-              name: leads.name,
-              phone: leads.phone,
-              status: leads.status,
-              updatedAt: leads.updatedAt,
-            })
-            .from(leads)
-            .where(or(...conds))
-            .orderBy(desc(leads.updatedAt))
-            .limit(5)
-        : [];
-
-    return NextResponse.json({
-      ok: true,
-      inferredLeadName: imported.inferredLeadName,
-      inferredPhones: imported.inferredPhones,
-      audioStats: imported.audioStats,
-      messageCount: imported.chat.messages.length,
-      firstMessageAt: imported.chat.messages[0]?.timestamp,
-      lastMessageAt: imported.chat.messages.at(-1)?.timestamp,
-      lead: extracted.lead,
-      renderedChat: imported.renderedChat,
-      transcripts: imported.transcripts,
-      existingMatches: matches,
     });
+
+    return NextResponse.json(
+      { ok: true, id, status: "pending", duplicate: false },
+      { status: 202 }
+    );
   } catch (e) {
     const message = e instanceof Error ? e.message : "שגיאה לא ידועה";
-    console.error("WhatsApp import failed:", e);
+    console.error("WhatsApp import enqueue failed:", e);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

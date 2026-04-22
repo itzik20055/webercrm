@@ -11,8 +11,15 @@ import {
   boolean,
   jsonb,
   vector,
+  customType,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const languageEnum = pgEnum("language", ["he", "en", "yi"]);
 export const audienceEnum = pgEnum("audience", [
@@ -316,6 +323,67 @@ export const pendingCallRecordings = pgTable(
   ]
 );
 
+export const pendingWhatsAppImportStatusEnum = pgEnum(
+  "pending_whatsapp_import_status",
+  ["pending", "processing", "done", "failed", "merged", "dismissed"]
+);
+
+/**
+ * Inbox staging area for user-uploaded WhatsApp chat exports. Upload handler
+ * writes the raw ZIP here and returns immediately; a worker (triggered fire-
+ * and-forget from the handler, plus a cron safety net) claims rows via
+ * SKIP LOCKED, transcribes audio, extracts the lead, and moves the row to
+ * `done` for review. `content_hash` is UNIQUE so accidental double-uploads of
+ * the same export collapse to one job — no repeat AI/transcription spend.
+ *
+ * `failed` is terminal: we never auto-retry. The user decides from the inbox
+ * whether to delete and try again — mechanical retries could burn tokens on
+ * a malformed file or a transient gateway error we can't diagnose.
+ */
+export const pendingWhatsAppImports = pgTable(
+  "pending_whatsapp_imports",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    /** SHA-256 of the uploaded file bytes — idempotency key. */
+    contentHash: text().notNull(),
+    originalFilename: text().notNull(),
+    /** Raw upload bytes. Cleared (set to empty) once processing succeeds to save space. */
+    fileBytes: bytea().notNull(),
+    /** true when the upload is a .zip (else .txt, no audio). */
+    isZip: boolean().notNull(),
+    language: languageEnum(),
+    status: pendingWhatsAppImportStatusEnum().notNull().default("pending"),
+    /** When the worker claimed the row. Reset only on terminal transition. */
+    processingStartedAt: timestamp({ withTimezone: true }),
+    processedAt: timestamp({ withTimezone: true }),
+    /** Populated when status transitions to `failed`. */
+    error: text(),
+    /** Populated on `done`: lead name we detected in the chat. */
+    inferredLeadName: text(),
+    inferredPhones: text().array().notNull().default(sql`'{}'::text[]`),
+    /** Populated on `done`: full chat text sent to the AI (for preview/debug). */
+    renderedChat: text(),
+    /** Populated on `done`: AI-extracted lead profile (ExtractedLead shape). */
+    extraction: jsonb(),
+    /** { total, transcribed, skipped } */
+    audioStats: jsonb(),
+    messageCount: integer(),
+    firstMessageAt: timestamp({ withTimezone: true }),
+    lastMessageAt: timestamp({ withTimezone: true }),
+    /** Lead IDs that match inferred name/phone — UI offers them as merge targets. */
+    matchCandidateIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    /** If user picked merge/approve, the resulting/target lead. */
+    resolvedLeadId: uuid().references(() => leads.id, { onDelete: "set null" }),
+    resolvedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("pending_wa_imports_hash_idx").on(t.contentHash),
+    index("pending_wa_imports_status_idx").on(t.status),
+    index("pending_wa_imports_created_idx").on(t.createdAt),
+  ]
+);
+
 export const appSettings = pgTable("app_settings", {
   key: text().primaryKey(),
   value: text().notNull(),
@@ -372,6 +440,8 @@ export type PushSubscription = typeof pushSubscriptions.$inferSelect;
 export type AppSetting = typeof appSettings.$inferSelect;
 export type PendingCallRecording = typeof pendingCallRecordings.$inferSelect;
 export type NewPendingCallRecording = typeof pendingCallRecordings.$inferInsert;
+export type PendingWhatsAppImport = typeof pendingWhatsAppImports.$inferSelect;
+export type NewPendingWhatsAppImport = typeof pendingWhatsAppImports.$inferInsert;
 
 export const LANGUAGE_LABELS: Record<Lead["language"], string> = {
   he: "עברית",

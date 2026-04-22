@@ -11,13 +11,22 @@ import {
   X,
   MessageCircle,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
-import { db, leads, pendingCallRecordings, type Lead } from "@/db";
-import { desc, eq } from "drizzle-orm";
+import {
+  db,
+  leads,
+  pendingCallRecordings,
+  pendingWhatsAppImports,
+  type Lead,
+  type PendingWhatsAppImport,
+} from "@/db";
+import { desc, eq, inArray } from "drizzle-orm";
 import {
   rejectPendingExtraction,
   deleteLeadFromInbox,
   dismissCallRecording,
+  dismissWhatsAppImport,
   type PendingExtraction,
 } from "./actions";
 import {
@@ -35,7 +44,7 @@ interface PendingExtractionLite {
 }
 
 export default async function InboxPage() {
-  const [pendingRecordings, reviewLeads] = await Promise.all([
+  const [pendingRecordings, reviewLeads, waImports] = await Promise.all([
     db
       .select()
       .from(pendingCallRecordings)
@@ -48,9 +57,36 @@ export default async function InboxPage() {
       .where(eq(leads.needsReview, true))
       .orderBy(desc(leads.updatedAt))
       .limit(50),
+    db
+      .select({
+        id: pendingWhatsAppImports.id,
+        status: pendingWhatsAppImports.status,
+        originalFilename: pendingWhatsAppImports.originalFilename,
+        inferredLeadName: pendingWhatsAppImports.inferredLeadName,
+        inferredPhones: pendingWhatsAppImports.inferredPhones,
+        extraction: pendingWhatsAppImports.extraction,
+        audioStats: pendingWhatsAppImports.audioStats,
+        messageCount: pendingWhatsAppImports.messageCount,
+        matchCandidateIds: pendingWhatsAppImports.matchCandidateIds,
+        error: pendingWhatsAppImports.error,
+        createdAt: pendingWhatsAppImports.createdAt,
+        processedAt: pendingWhatsAppImports.processedAt,
+      })
+      .from(pendingWhatsAppImports)
+      .where(
+        inArray(pendingWhatsAppImports.status, [
+          "pending",
+          "processing",
+          "done",
+          "failed",
+        ])
+      )
+      .orderBy(desc(pendingWhatsAppImports.createdAt))
+      .limit(50),
   ]);
 
-  const total = pendingRecordings.length + reviewLeads.length;
+  const total =
+    pendingRecordings.length + reviewLeads.length + waImports.length;
 
   return (
     <div className="px-4 pt-5 pb-6 space-y-5">
@@ -91,6 +127,14 @@ export default async function InboxPage() {
         <Group title="שיחות מוקלטות" tone="primary" count={pendingRecordings.length}>
           {pendingRecordings.map((r) => (
             <PendingCallCard key={r.id} recording={r} />
+          ))}
+        </Group>
+      )}
+
+      {waImports.length > 0 && (
+        <Group title="ייבוא וואטסאפ" tone="primary" count={waImports.length}>
+          {waImports.map((r) => (
+            <WhatsAppImportCard key={r.id} row={r} />
           ))}
         </Group>
       )}
@@ -233,6 +277,151 @@ function PendingCallCard({
         >
           <MessageCircle className="size-[18px]" strokeWidth={2.2} />
         </a>
+        <div className="flex-1" />
+        <form action={dismiss}>
+          <button
+            type="submit"
+            className="press h-11 px-3 rounded-full text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-card flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="דלג"
+          >
+            <X className="size-4" strokeWidth={2.2} />
+            דלג
+          </button>
+        </form>
+      </div>
+    </article>
+  );
+}
+
+function WhatsAppImportCard({
+  row,
+}: {
+  row: Pick<
+    PendingWhatsAppImport,
+    | "id"
+    | "status"
+    | "originalFilename"
+    | "inferredLeadName"
+    | "inferredPhones"
+    | "extraction"
+    | "audioStats"
+    | "messageCount"
+    | "matchCandidateIds"
+    | "error"
+    | "createdAt"
+    | "processedAt"
+  >;
+}) {
+  const isWorking = row.status === "pending" || row.status === "processing";
+  const failed = row.status === "failed";
+  const done = row.status === "done";
+  const extraction = (row.extraction as PendingExtractionLite | null) ?? null;
+  const displayName =
+    extraction?.customerName?.trim() ||
+    row.inferredLeadName?.trim() ||
+    row.originalFilename;
+  const phone = row.inferredPhones?.[0];
+  const summary = extraction?.summary?.trim();
+  const dismiss = dismissWhatsAppImport.bind(null, row.id);
+
+  const body = (
+    <div className="flex items-start gap-3">
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <MessageCircle
+            className="size-4 text-emerald-700 dark:text-emerald-300"
+            strokeWidth={2.2}
+          />
+          <span className="font-semibold tracking-tight truncate">
+            {displayName}
+          </span>
+          {isWorking && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
+              <Loader2 className="size-2.5 animate-spin" />
+              מעבד
+            </span>
+          )}
+          {done && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
+              <Sparkles className="size-2.5" />
+              AI
+            </span>
+          )}
+          {failed && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-destructive bg-destructive/10 rounded-full px-1.5 py-0.5">
+              <AlertTriangle className="size-2.5" />
+              נכשל
+            </span>
+          )}
+          {done && row.matchCandidateIds.length > 0 && (
+            <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 rounded-full px-1.5 py-0.5">
+              ליד תואם
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+          {phone && (
+            <>
+              <span dir="ltr">{phone}</span>
+              <span>·</span>
+            </>
+          )}
+          <span>{relativeTime(row.createdAt)}</span>
+          {done && row.messageCount && (
+            <>
+              <span>·</span>
+              <span>{row.messageCount} הודעות</span>
+            </>
+          )}
+        </div>
+        {isWorking ? (
+          <p className="text-sm text-muted-foreground italic pt-0.5">
+            מתמלל הודעות קוליות ומחלץ פרטים...
+          </p>
+        ) : failed ? (
+          <p className="text-sm text-destructive/90 line-clamp-2 leading-snug pt-0.5">
+            {row.error ?? "שגיאה לא ידועה"}
+          </p>
+        ) : summary ? (
+          <p className="text-sm text-foreground/85 line-clamp-3 leading-snug pt-0.5 whitespace-pre-line">
+            {summary}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground italic pt-0.5">
+            אין סיכום — תצטרך למלא ידנית.
+          </p>
+        )}
+      </div>
+      {done && <ChevronLeft className="size-5 text-muted-foreground shrink-0 mt-1" />}
+    </div>
+  );
+
+  return (
+    <article className="bg-card border border-border/70 rounded-2xl shadow-soft overflow-hidden">
+      {done ? (
+        <Link
+          href={`/inbox/whatsapp/${row.id}`}
+          className="press block p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label="פתח לאישור"
+        >
+          {body}
+        </Link>
+      ) : (
+        <div className="p-4">{body}</div>
+      )}
+
+      <div className="border-t border-border/60 bg-muted/30 px-2 py-1.5 flex items-center gap-1">
+        {phone && done && (
+          <a
+            href={whatsappLink(phone)}
+            target="_blank"
+            rel="noreferrer"
+            className="press size-11 rounded-full text-emerald-700 dark:text-emerald-300 flex items-center justify-center hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+            aria-label="וואטסאפ"
+          >
+            <MessageCircle className="size-[18px]" strokeWidth={2.2} />
+          </a>
+        )}
         <div className="flex-1" />
         <form action={dismiss}>
           <button

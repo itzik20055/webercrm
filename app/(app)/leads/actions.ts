@@ -3,7 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { db, leads, followups, interactions, type Lead } from "@/db";
+import {
+  db,
+  leads,
+  followups,
+  interactions,
+  pendingWhatsAppImports,
+  type Lead,
+} from "@/db";
 import { and, asc, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { reprocessLeadProfile } from "@/lib/ai-client";
 import { getSetting } from "@/lib/settings";
@@ -332,7 +339,21 @@ const importSchema = z.object({
   // Optional followup
   followupAt: z.string().nullish(),
   followupReason: z.string().nullish(),
+  // If set, mark that pending_whatsapp_imports row as resolved.
+  pendingImportId: z.string().uuid().nullish(),
 });
+
+async function resolvePendingImport(pendingId: string | null | undefined, leadId: string) {
+  if (!pendingId) return;
+  await db
+    .update(pendingWhatsAppImports)
+    .set({
+      status: "merged",
+      resolvedLeadId: leadId,
+      resolvedAt: new Date(),
+    })
+    .where(eq(pendingWhatsAppImports.id, pendingId));
+}
 
 export async function createLeadFromImport(formData: FormData) {
   const obj: Record<string, unknown> = {};
@@ -392,7 +413,10 @@ export async function createLeadFromImport(formData: FormData) {
     }
   }
 
+  await resolvePendingImport(parsed.pendingImportId, created.id);
+
   revalidatePath("/leads");
+  revalidatePath("/inbox");
   revalidatePath("/");
   redirect(`/leads/${created.id}`);
 }
@@ -418,6 +442,7 @@ const mergeImportSchema = z.object({
   chatTranscript: z.string().min(1),
   followupAt: z.string().nullish(),
   followupReason: z.string().nullish(),
+  pendingImportId: z.string().uuid().nullish(),
 });
 
 export async function mergeImportIntoLead(formData: FormData) {
@@ -518,7 +543,10 @@ export async function mergeImportIntoLead(formData: FormData) {
     }
   }
 
+  await resolvePendingImport(parsed.pendingImportId, parsed.leadId);
+
   revalidatePath("/leads");
+  revalidatePath("/inbox");
   revalidatePath(`/leads/${parsed.leadId}`);
   revalidatePath("/");
   redirect(`/leads/${parsed.leadId}`);
