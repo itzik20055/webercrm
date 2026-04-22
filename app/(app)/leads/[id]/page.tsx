@@ -302,6 +302,11 @@ export default async function LeadPage({
                       : null
               }
             />
+            <Row
+              label="איפה היה בעבר"
+              value={lead.previousStays}
+              className="col-span-2"
+            />
           </dl>
         </Card>
 

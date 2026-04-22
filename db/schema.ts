@@ -95,6 +95,8 @@ export const leads = pgTable(
     interestTags: text().array().notNull().default(sql`'{}'::text[]`),
     whatSpokeToThem: text(),
     objections: text(),
+    /** Free text — hotels the lead stayed at in previous years. */
+    previousStays: text(),
     nextFollowupAt: timestamp({ withTimezone: true }),
     followupCompletedAt: timestamp({ withTimezone: true }),
     priority: priorityEnum().notNull().default("warm"),

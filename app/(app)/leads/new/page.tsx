@@ -97,6 +97,15 @@ export default async function NewLeadPage({
           />
         </Field>
 
+        <Field label="איפה היה בעבר">
+          <textarea
+            name="previousStays"
+            rows={2}
+            placeholder="רימונים 2024, אחוזה 2023..."
+            className="form-input resize-none"
+          />
+        </Field>
+
         <Field label="הערה ראשונית">
           <textarea
             name="notes"

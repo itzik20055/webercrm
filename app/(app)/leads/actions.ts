@@ -32,6 +32,7 @@ const createSchema = z.object({
     .enum(["call", "whatsapp", "email", "referral", "other"])
     .default("whatsapp"),
   source: z.string().max(120).optional(),
+  previousStays: z.string().max(500).optional(),
   notes: z.string().max(2000).optional(),
 });
 
@@ -52,6 +53,8 @@ export async function createLead(formData: FormData) {
       | "referral"
       | "other",
     source: String(formData.get("source") ?? "").trim() || undefined,
+    previousStays:
+      String(formData.get("previousStays") ?? "").trim() || undefined,
     notes: String(formData.get("notes") ?? "").trim() || undefined,
   };
   const parsed = createSchema.parse(raw);
@@ -82,6 +85,7 @@ export async function createLead(formData: FormData) {
       audience: parsed.audience,
       channelFirst: parsed.channelFirst,
       source: parsed.source,
+      previousStays: parsed.previousStays,
       notes: parsed.notes,
     })
     .returning({ id: leads.id });
@@ -126,6 +130,7 @@ const updateSchema = z.object({
   whatSpokeToThem: z.string().max(1000).nullish(),
   objections: z.string().max(1000).nullish(),
   source: z.string().max(120).nullish(),
+  previousStays: z.string().max(500).nullish(),
   notes: z.string().max(4000).nullish(),
   lostReason: z.string().max(500).nullish(),
 });

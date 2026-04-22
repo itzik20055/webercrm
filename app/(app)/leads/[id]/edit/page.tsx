@@ -86,10 +86,24 @@ export default async function EditLeadPage({
                 ))}
               </select>
             </Field>
-            <Field label="מקור">
-              <input name="source" defaultValue={lead.source ?? ""} className="form-input" />
+            <Field label="מקור (איך שמע עלינו)">
+              <input
+                name="source"
+                defaultValue={lead.source ?? ""}
+                placeholder="חבר, פייסבוק, מודעה..."
+                className="form-input"
+              />
             </Field>
           </div>
+          <Field label="איפה היה בעבר">
+            <textarea
+              name="previousStays"
+              defaultValue={lead.previousStays ?? ""}
+              rows={2}
+              placeholder="רימונים 2024, אחוזה 2023..."
+              className="form-input resize-none"
+            />
+          </Field>
         </Section>
 
         <Section title="סטטוס">
