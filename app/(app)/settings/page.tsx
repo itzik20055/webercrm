@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import {
   LogOut,
@@ -45,11 +46,6 @@ export default async function SettingsPage() {
   const vapid = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const whatsappName = await getSetting("whatsapp_display_name");
   const hasGatewayKey = !!process.env.AI_GATEWAY_API_KEY;
-
-  const callStatus = await countPendingCallRecordings().catch((e) => ({
-    error: e instanceof Error ? e.message : String(e),
-  }));
-  const callsPaused = (await getSetting("call_recordings_paused")) === "1";
 
   return (
     <div className="px-4 pt-4 pb-4 space-y-5">
@@ -112,7 +108,9 @@ export default async function SettingsPage() {
       </Section>
 
       <Section title="הקלטות שיחה" icon={<Phone className="size-4" />}>
-        <CallRecordingsPanel initial={callStatus} initialPaused={callsPaused} />
+        <Suspense fallback={<CallRecordingsLoading />}>
+          <CallRecordingsSection />
+        </Suspense>
       </Section>
 
       <Section title="צריכת AI (24 ש' אחרונות)" icon={<CircleDollarSign className="size-4" />}>
@@ -156,6 +154,26 @@ export default async function SettingsPage() {
       <p className="text-xs text-center text-muted-foreground pt-4">
         Weber Leads · עונה 2026
       </p>
+    </div>
+  );
+}
+
+async function CallRecordingsSection() {
+  const [callStatus, callsPausedStr] = await Promise.all([
+    countPendingCallRecordings().catch((e) => ({
+      error: e instanceof Error ? e.message : String(e),
+    })),
+    getSetting("call_recordings_paused"),
+  ]);
+  const callsPaused = callsPausedStr === "1";
+  return <CallRecordingsPanel initial={callStatus} initialPaused={callsPaused} />;
+}
+
+function CallRecordingsLoading() {
+  return (
+    <div className="space-y-2" aria-busy="true">
+      <div className="h-4 w-40 rounded-full bg-muted/25 animate-pulse" />
+      <div className="h-11 rounded-lg bg-muted/20 animate-pulse" />
     </div>
   );
 }
