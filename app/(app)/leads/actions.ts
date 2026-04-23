@@ -787,7 +787,7 @@ export interface ReprocessResult {
  * Matches the client-side undo banner window in components/lead-ai-reprocess.tsx.
  * Keep them in sync — if the client window ever changes, this constant must too.
  */
-const REPROCESS_LOCK_MS = 30_000;
+const REPROCESS_UNDO_WINDOW_MS = 30_000;
 
 /**
  * Runs the full conversation + profile through the AI and applies the resulting
@@ -798,16 +798,6 @@ const REPROCESS_LOCK_MS = 30_000;
 export async function reprocessLeadWithAi(leadId: string): Promise<ReprocessResult> {
   const [lead] = await db.select().from(leads).where(eq(leads.id, leadId));
   if (!lead) throw new Error("הליד לא נמצא");
-
-  if (lead.lastReprocessedAt) {
-    const sinceLast = Date.now() - lead.lastReprocessedAt.getTime();
-    if (sinceLast < REPROCESS_LOCK_MS) {
-      const remaining = Math.ceil((REPROCESS_LOCK_MS - sinceLast) / 1000);
-      throw new Error(
-        `המתן ${remaining} שניות (חלון ביטול), או בטל את העיבוד הקודם`
-      );
-    }
-  }
 
   const [allInteractions, openFollowupsRows] = await Promise.all([
     db
@@ -837,7 +827,17 @@ export async function reprocessLeadWithAi(leadId: string): Promise<ReprocessResu
     ourName,
   });
 
-  const snapshot = buildSnapshot(lead);
+  // If a previous reprocess is still inside the undo window, keep its snapshot
+  // as the restore target. Otherwise the original state the user could still
+  // undo to gets silently overwritten by the state *after* that reprocess, and
+  // Undo only rolls back one step.
+  const previousSnapshotStillRevertible =
+    lead.lastReprocessSnapshot !== null &&
+    lead.lastReprocessedAt !== null &&
+    Date.now() - lead.lastReprocessedAt.getTime() < REPROCESS_UNDO_WINDOW_MS;
+  const snapshot: ReprocessSnapshot = previousSnapshotStillRevertible
+    ? (lead.lastReprocessSnapshot as ReprocessSnapshot)
+    : buildSnapshot(lead);
 
   let followupSuggestion: PendingFollowupSuggestion | null = null;
   if (profile.followupAction === "reschedule" && profile.followupHoursFromNow != null) {
