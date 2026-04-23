@@ -4,6 +4,8 @@ import { normalizeEmailAddress } from "./email-config";
 export interface ParsedEmail {
   messageId: string;
   from: string;
+  /** Display name from the "From" header ("Sarah Cohen"), when present. */
+  fromName: string | null;
   to: string[];
   subject: string;
   bodyText: string;
@@ -56,6 +58,16 @@ function firstAddress(addrs: AddressObject | AddressObject[] | undefined): strin
   return "";
 }
 
+function firstDisplayName(addrs: AddressObject | AddressObject[] | undefined): string | null {
+  if (!addrs) return null;
+  const list = Array.isArray(addrs) ? addrs : [addrs];
+  for (const obj of list) {
+    const v = obj?.value?.[0]?.name;
+    if (v && v.trim()) return v.trim();
+  }
+  return null;
+}
+
 function allAddresses(addrs: AddressObject | AddressObject[] | undefined): string[] {
   if (!addrs) return [];
   const list = Array.isArray(addrs) ? addrs : [addrs];
@@ -94,6 +106,7 @@ export async function parseEmail(source: Buffer): Promise<ParsedEmail | null> {
   return {
     messageId,
     from: firstAddress(parsed.from),
+    fromName: firstDisplayName(parsed.from),
     to: allAddresses(parsed.to),
     subject: parsed.subject ?? "",
     bodyText,

@@ -10,17 +10,41 @@ import {
 } from "@/components/lead-review-form";
 import { mergeEmailBatch, dismissEmailImport } from "../../actions";
 import type { ExtractedLead } from "@/lib/ai-client";
+import {
+  guessLeadNameFromMessages,
+  extractPhonesFromMessages,
+} from "@/lib/email-import-worker";
+import type { FetchedMessage } from "@/lib/email-imap";
 
 export const dynamic = "force-dynamic";
 
 interface StoredEmailMessage {
   messageId: string;
   from: string;
+  fromName?: string | null;
   to: string[];
   subject: string;
   bodyText: string;
   receivedAt: string;
   direction: "in" | "out";
+}
+
+/**
+ * The helpers in email-import-worker expect `FetchedMessage` (with Date
+ * objects). The stored row has ISO strings — hydrate just the fields the
+ * helpers actually read.
+ */
+function hydrate(messages: StoredEmailMessage[]): FetchedMessage[] {
+  return messages.map((m) => ({
+    messageId: m.messageId,
+    from: m.from,
+    fromName: m.fromName ?? null,
+    to: m.to,
+    subject: m.subject,
+    bodyText: m.bodyText,
+    receivedAt: new Date(m.receivedAt),
+    direction: m.direction,
+  }));
 }
 
 export default async function EmailReviewPage({
@@ -107,6 +131,12 @@ export default async function EmailReviewPage({
   const extraction = row.extraction as ExtractedLead | null;
   if (!extraction) notFound();
 
+  const hydrated = hydrate(messages);
+  const inferredName =
+    extraction.customerName ??
+    guessLeadNameFromMessages(hydrated, row.emailAddress ?? "");
+  const inferredPhone = extractPhonesFromMessages(hydrated)[0] ?? null;
+
   return (
     <div className="px-4 pt-4 pb-4 space-y-4">
       <BackHeader />
@@ -115,7 +145,8 @@ export default async function EmailReviewPage({
         mode={{
           kind: "email-import",
           pendingId: row.id,
-          inferredName: extraction.customerName ?? null,
+          inferredName,
+          inferredPhone,
           emailAddress: row.emailAddress ?? "",
           existingMatches: matches,
           messageCount: row.messageCount,

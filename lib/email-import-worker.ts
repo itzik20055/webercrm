@@ -85,11 +85,17 @@ async function findMatches(leadName: string | null, phones: string[], emailAddre
 
 /**
  * Render a fetched thread into a single chat-like text block for the AI.
- * Matches the shape extractLeadFromChat expects — "[SELF]:" lines for
- * outbound, "[NAME]:" for inbound. Subjects are included on the first
- * occurrence because they often carry the topic.
+ * The speaker label uses the actual sender display name (or the email's
+ * local-part as a fallback) rather than a hard-coded "[NAME]". `anonymize()`
+ * downstream replaces the inferred lead name with "[NAME]" uniformly, so the
+ * AI sees a real name to match inside the body text (greetings, signatures,
+ * "my name is X" statements).
  */
-function renderThreadForAi(messages: FetchedMessage[], ourName: string): string {
+function renderThreadForAi(
+  messages: FetchedMessage[],
+  ourName: string,
+  leadDisplay: string
+): string {
   const lines: string[] = [];
   let lastSubject = "";
   for (const m of messages) {
@@ -97,27 +103,52 @@ function renderThreadForAi(messages: FetchedMessage[], ourName: string): string 
       lines.push(`(נושא: ${m.subject})`);
       lastSubject = m.subject;
     }
-    const who = m.direction === "out" ? ourName : "[NAME]";
+    const who = m.direction === "out" ? ourName : leadDisplay;
     const ts = m.receivedAt.toLocaleString("he-IL", { timeZone: "Asia/Jerusalem" });
+    const header =
+      m.direction === "out"
+        ? `(אל: ${m.to.join(", ")})`
+        : `(מאת: ${m.from}${m.fromName ? ` · "${m.fromName}"` : ""})`;
     const body = m.bodyText.trim();
-    lines.push(`[${ts}] ${who}:\n${body}`);
+    lines.push(`[${ts}] ${who} ${header}:\n${body}`);
     lines.push("");
   }
   return lines.join("\n");
 }
 
-function guessLeadNameFromMessages(messages: FetchedMessage[], emailAddress: string): string | null {
-  // Try to pull "Full Name <email>" display name from any inbound message's
-  // From header. mailparser already normalizes addresses to lowercase in our
-  // parser, so we don't have the original display name here — for v1, we
-  // return null and let the AI extract the name from the body.
-  // emailAddress is kept for potential future use (local-part heuristic).
-  void messages;
-  void emailAddress;
-  return null;
+function prettifyLocalPart(addr: string): string {
+  const local = addr.split("@")[0] ?? "";
+  if (!local) return "";
+  // "sarah.cohen" → "Sarah Cohen", "sarah_cohen" → "Sarah Cohen"
+  return local
+    .replace(/[._\-]+/g, " ")
+    .replace(/\d+/g, "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
 }
 
-function extractPhonesFromMessages(messages: FetchedMessage[]): string[] {
+/**
+ * Best guess at the lead's name for pre-filling the review form.
+ * Priority: display name from any inbound "From" header → prettified
+ * local-part of the email address → null.
+ */
+export function guessLeadNameFromMessages(
+  messages: FetchedMessage[],
+  emailAddress: string
+): string | null {
+  for (const m of messages) {
+    if (m.direction === "in" && m.fromName && m.fromName.trim()) {
+      return m.fromName.trim();
+    }
+  }
+  const pretty = prettifyLocalPart(emailAddress);
+  return pretty || null;
+}
+
+export function extractPhonesFromMessages(messages: FetchedMessage[]): string[] {
   const set = new Set<string>();
   // Very loose — Israeli 10-digit, international +... Up to ~18 chars.
   const re = /(\+?\d[\d\s\-().]{7,17}\d)/g;
@@ -167,8 +198,9 @@ export async function processEmailImport(opts: { id?: string } = {}): Promise<Im
       );
     }
 
-    const chatText = renderThreadForAi(messages, ourName);
     const inferredName = guessLeadNameFromMessages(messages, emailAddress);
+    const leadDisplay = inferredName || prettifyLocalPart(emailAddress) || "הלקוח";
+    const chatText = renderThreadForAi(messages, ourName, leadDisplay);
 
     const { lead: extraction } = await extractLeadFromChat({
       chatText,
@@ -186,6 +218,7 @@ export async function processEmailImport(opts: { id?: string } = {}): Promise<Im
     const messagesJson = messages.map((m) => ({
       messageId: m.messageId,
       from: m.from,
+      fromName: m.fromName ?? null,
       to: m.to,
       subject: m.subject,
       bodyText: m.bodyText,

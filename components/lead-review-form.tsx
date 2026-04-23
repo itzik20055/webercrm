@@ -100,6 +100,7 @@ export type ReviewMode =
       kind: "email-import";
       pendingId: string;
       inferredName: string | null;
+      inferredPhone: string | null;
       emailAddress: string;
       existingMatches: ExistingMatch[];
       messageCount: number;
@@ -143,7 +144,7 @@ export function LeadReviewForm({
   const [phone, setPhone] = useState(() => {
     if (mode.kind === "import") return mode.inferredPhone ?? "";
     if (mode.kind === "call") return mode.inferredPhone;
-    if (mode.kind === "email-import") return "";
+    if (mode.kind === "email-import") return mode.inferredPhone ?? "";
     return mode.leadPhone;
   });
   const [error, setError] = useState<string | null>(null);
