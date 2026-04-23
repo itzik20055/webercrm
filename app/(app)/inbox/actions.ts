@@ -565,7 +565,15 @@ export async function mergeEmailBatch(importId: string) {
 
 const emailApproveSchema = z.object({
   name: z.string().min(1).max(120),
-  phone: z.string().min(5).max(40),
+  // Email leads often don't include a phone — allow empty. Minimum 5 only
+  // enforced when a value is actually provided.
+  phone: z
+    .string()
+    .max(40)
+    .transform((v) => v.trim())
+    .refine((v) => v === "" || v.length >= 5, {
+      message: "מספר טלפון קצר מדי",
+    }),
   language: z.enum(["he", "en", "yi"]),
   audience: z.enum(["israeli_haredi", "american_haredi", "european_haredi"]),
   status: z.enum(["new", "contacted", "interested", "quoted", "closing", "booked", "lost"]),

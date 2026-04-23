@@ -346,11 +346,16 @@ export function LeadReviewForm({
                   </button>
                 )}
             </Field>
-            <Field label="טלפון" htmlFor="lrf-phone">
+            <Field
+              label={
+                mode.kind === "email-import" ? "טלפון (אופציונלי)" : "טלפון"
+              }
+              htmlFor="lrf-phone"
+            >
               <input
                 id="lrf-phone"
                 name="phone"
-                required
+                required={mode.kind !== "email-import"}
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="לדוגמה: 0501234567"
@@ -359,6 +364,11 @@ export function LeadReviewForm({
                 inputMode="tel"
                 autoComplete="tel"
               />
+              {mode.kind === "email-import" && !phone && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  לידים במייל יכולים להישמר בלי טלפון — אפשר למלא אחר כך.
+                </p>
+              )}
             </Field>
           </>
         )}
@@ -613,7 +623,11 @@ export function LeadReviewForm({
         </Link>
         <button
           type="submit"
-          disabled={pending || (identityRequired && (!name || !phone))}
+          disabled={
+            pending ||
+            (identityRequired &&
+              (!name || (mode.kind !== "email-import" && !phone)))
+          }
           className="press flex-1 h-12 rounded-full bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 disabled:opacity-50 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           {pending ? (
