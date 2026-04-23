@@ -1,10 +1,11 @@
 "use server";
 
 import { z } from "zod";
-import { desc, eq, ilike, or } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db, leads, voiceExamples, interactions, type Lead } from "@/db";
 import { embedOne } from "@/lib/embeddings";
 import { anonymize } from "@/lib/anonymize";
+import { leadSearchCondition } from "@/lib/lead-search";
 
 /**
  * Manual save score — slightly above the "manual" default (0.5). The cron
@@ -32,7 +33,8 @@ export async function searchLeadsForChat(
 ): Promise<LeadSearchHit[]> {
   const parsed = SearchSchema.safeParse(input);
   if (!parsed.success) return [];
-  const term = `%${parsed.data.q.trim()}%`;
+  const where = leadSearchCondition(parsed.data.q);
+  if (!where) return [];
   const limit = parsed.data.limit ?? 8;
   return db
     .select({
@@ -44,7 +46,7 @@ export async function searchLeadsForChat(
       language: leads.language,
     })
     .from(leads)
-    .where(or(ilike(leads.name, term), ilike(leads.phone, term)))
+    .where(where)
     .orderBy(desc(leads.updatedAt))
     .limit(limit);
 }

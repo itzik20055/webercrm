@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { Plus, Search, Users, Phone, MessageCircle, Sparkles } from "lucide-react";
 import { db, leads } from "@/db";
-import { and, count, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, sql, type SQL } from "drizzle-orm";
+import { leadSearchCondition } from "@/lib/lead-search";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
@@ -34,15 +35,8 @@ export default async function LeadsListPage({
 
   const conds: SQL[] = [];
   if (q) {
-    const term = `%${q}%`;
-    conds.push(
-      or(
-        ilike(leads.name, term),
-        ilike(leads.phone, term),
-        ilike(leads.email, term),
-        ilike(leads.notes, term)
-      )!
-    );
+    const search = leadSearchCondition(q, { includeNotes: true });
+    if (search) conds.push(search);
   }
   if (statusFilter && statusFilter !== "all") {
     if (statusFilter === "active") {
