@@ -46,7 +46,7 @@ export default async function ImportLeadPage() {
         </div>
       )}
 
-      <section className="space-y-3">
+      <section id="whatsapp" className="space-y-3 scroll-mt-20">
         <div className="flex items-center gap-2 px-1">
           <MessageCircle className="size-4 text-emerald-700 dark:text-emerald-300" />
           <h2 className="text-[13px] font-bold tracking-tight text-foreground">
@@ -62,7 +62,7 @@ export default async function ImportLeadPage() {
         )}
       </section>
 
-      <section className="space-y-3">
+      <section id="email" className="space-y-3 scroll-mt-20">
         <div className="flex items-center gap-2 px-1">
           <Mail className="size-4 text-primary" />
           <h2 className="text-[13px] font-bold tracking-tight text-foreground">

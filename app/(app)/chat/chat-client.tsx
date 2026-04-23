@@ -17,6 +17,7 @@ import {
   ClipboardPaste,
   ChevronRight,
   MessageSquareText,
+  Mail,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -286,12 +287,20 @@ function ChatHeader({
         </div>
         <div className="flex items-center gap-2">
           <Link
-            href="/leads/import"
+            href="/leads/import#whatsapp"
             className="press text-[11px] font-medium text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1"
             aria-label="ייבוא צ'אט וואטסאפ"
           >
             <MessageSquareText className="size-3" />
             ייבוא וואטסאפ
+          </Link>
+          <Link
+            href="/leads/import#email"
+            className="press text-[11px] font-medium text-primary inline-flex items-center gap-1"
+            aria-label="ייבוא התכתבות מייל"
+          >
+            <Mail className="size-3" />
+            ייבוא מייל
           </Link>
           {canReset && (
             <button
@@ -443,19 +452,35 @@ function EmptyChat({
         ))}
       </div>
 
-      <Link
-        href="/leads/import"
-        className="press flex items-center gap-3 text-right p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-900 dark:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-      >
-        <MessageSquareText className="size-5 shrink-0 text-emerald-700 dark:text-emerald-300" />
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">ייבוא צ'אט וואטסאפ</div>
-          <div className="text-[11px] text-emerald-900/70 dark:text-emerald-200/70 leading-snug">
-            ZIP מוואטסאפ → AI מחלץ ליד מלא, כולל הודעות קוליות.
+      <div className="space-y-2">
+        <Link
+          href="/leads/import#whatsapp"
+          className="press flex items-center gap-3 text-right p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-900 dark:text-emerald-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+        >
+          <MessageSquareText className="size-5 shrink-0 text-emerald-700 dark:text-emerald-300" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold">ייבוא צ'אט וואטסאפ</div>
+            <div className="text-[11px] text-emerald-900/70 dark:text-emerald-200/70 leading-snug">
+              ZIP מוואטסאפ → AI מחלץ ליד מלא, כולל הודעות קוליות.
+            </div>
           </div>
-        </div>
-        <ChevronRight className="size-4 -scale-x-100 text-emerald-700/60 dark:text-emerald-300/60" />
-      </Link>
+          <ChevronRight className="size-4 -scale-x-100 text-emerald-700/60 dark:text-emerald-300/60" />
+        </Link>
+
+        <Link
+          href="/leads/import#email"
+          className="press flex items-center gap-3 text-right p-3 rounded-2xl bg-primary/10 border border-primary/25 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <Mail className="size-5 shrink-0 text-primary" />
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold">ייבוא התכתבות מייל</div>
+            <div className="text-[11px] text-muted-foreground leading-snug">
+              כתובת מייל → נשלפת כל ההתכתבות ו-AI מחלץ ליד.
+            </div>
+          </div>
+          <ChevronRight className="size-4 -scale-x-100 text-primary/60" />
+        </Link>
+      </div>
     </div>
   );
 }
