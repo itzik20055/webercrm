@@ -10,6 +10,7 @@ import {
   Trash2,
   X,
   MessageCircle,
+  Mail,
   AlertTriangle,
   Loader2,
 } from "lucide-react";
@@ -17,8 +18,10 @@ import {
   db,
   leads,
   pendingCallRecordings,
+  pendingEmails,
   pendingWhatsAppImports,
   type Lead,
+  type PendingEmail,
   type PendingWhatsAppImport,
 } from "@/db";
 import { desc, eq, inArray } from "drizzle-orm";
@@ -27,6 +30,8 @@ import {
   deleteLeadFromInbox,
   dismissCallRecording,
   dismissWhatsAppImport,
+  dismissEmailImport,
+  mergeEmailBatch,
   type PendingExtraction,
 } from "./actions";
 import {
@@ -44,7 +49,7 @@ interface PendingExtractionLite {
 }
 
 export default async function InboxPage() {
-  const [pendingRecordings, reviewLeads, waImports] = await Promise.all([
+  const [pendingRecordings, reviewLeads, waImports, emailRows] = await Promise.all([
     db
       .select()
       .from(pendingCallRecordings)
@@ -83,10 +88,41 @@ export default async function InboxPage() {
       )
       .orderBy(desc(pendingWhatsAppImports.createdAt))
       .limit(50),
+    db
+      .select()
+      .from(pendingEmails)
+      .where(
+        inArray(pendingEmails.status, ["pending", "processing", "done", "failed"])
+      )
+      .orderBy(desc(pendingEmails.createdAt))
+      .limit(50),
   ]);
 
+  const emailLeadIds = Array.from(
+    new Set(
+      emailRows
+        .map((r) => r.leadId)
+        .filter((id): id is string => !!id)
+    )
+  );
+  const emailLeadRows =
+    emailLeadIds.length > 0
+      ? await db
+          .select({
+            id: leads.id,
+            name: leads.name,
+            email: leads.email,
+          })
+          .from(leads)
+          .where(inArray(leads.id, emailLeadIds))
+      : [];
+  const emailLeadsById = new Map(emailLeadRows.map((l) => [l.id, l]));
+
   const total =
-    pendingRecordings.length + reviewLeads.length + waImports.length;
+    pendingRecordings.length +
+    reviewLeads.length +
+    waImports.length +
+    emailRows.length;
 
   return (
     <div className="px-4 pt-5 pb-6 space-y-5">
@@ -135,6 +171,18 @@ export default async function InboxPage() {
         <Group title="ייבוא וואטסאפ" tone="primary" count={waImports.length}>
           {waImports.map((r) => (
             <WhatsAppImportCard key={r.id} row={r} />
+          ))}
+        </Group>
+      )}
+
+      {emailRows.length > 0 && (
+        <Group title="מיילים" tone="primary" count={emailRows.length}>
+          {emailRows.map((r) => (
+            <EmailImportCard
+              key={r.id}
+              row={r}
+              lead={r.leadId ? emailLeadsById.get(r.leadId) ?? null : null}
+            />
           ))}
         </Group>
       )}
@@ -423,6 +471,153 @@ function WhatsAppImportCard({
           </a>
         )}
         <div className="flex-1" />
+        <form action={dismiss}>
+          <button
+            type="submit"
+            className="press h-11 px-3 rounded-full text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-card flex items-center gap-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="דלג"
+          >
+            <X className="size-4" strokeWidth={2.2} />
+            דלג
+          </button>
+        </form>
+      </div>
+    </article>
+  );
+}
+
+function EmailImportCard({
+  row,
+  lead,
+}: {
+  row: PendingEmail;
+  lead: { id: string; name: string; email: string | null } | null;
+}) {
+  const isWorking = row.status === "pending" || row.status === "processing";
+  const failed = row.status === "failed";
+  const done = row.status === "done";
+  const extraction =
+    (row.extraction as PendingExtractionLite | null) ?? null;
+  const isUpdateBatch = row.kind === "update_batch";
+
+  const displayName = isUpdateBatch
+    ? lead?.name ?? "ליד"
+    : extraction?.customerName?.trim() || row.emailAddress || "ייבוא מייל";
+  const addressLine = isUpdateBatch
+    ? lead?.email ?? ""
+    : row.emailAddress ?? "";
+  const summary = isUpdateBatch
+    ? `${row.messageCount} הודעות חדשות מאז הסנכרון האחרון`
+    : extraction?.summary?.trim();
+
+  const dismiss = dismissEmailImport.bind(null, row.id);
+  const merge = isUpdateBatch ? mergeEmailBatch.bind(null, row.id) : null;
+
+  const linkHref = `/inbox/email/${row.id}`;
+
+  const body = (
+    <div className="flex items-start gap-3">
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Mail className="size-4 text-primary" strokeWidth={2.2} />
+          <span className="font-semibold tracking-tight truncate">
+            {displayName}
+          </span>
+          {isWorking && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
+              <Loader2 className="size-2.5 animate-spin" />
+              מעבד
+            </span>
+          )}
+          {done && !isUpdateBatch && (
+            <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
+              <Sparkles className="size-2.5" />
+              AI
+            </span>
+          )}
+          {isUpdateBatch && (
+            <span className="text-[10px] font-semibold text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
+              עדכון
+            </span>
+          )}
+          {failed && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-destructive bg-destructive/10 rounded-full px-1.5 py-0.5">
+              <AlertTriangle className="size-2.5" />
+              נכשל
+            </span>
+          )}
+          {done && !isUpdateBatch && row.matchCandidateIds.length > 0 && (
+            <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 rounded-full px-1.5 py-0.5">
+              ליד תואם
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+          {addressLine && (
+            <>
+              <span dir="ltr" className="truncate max-w-[200px]">
+                {addressLine}
+              </span>
+              <span>·</span>
+            </>
+          )}
+          <span>{relativeTime(row.createdAt)}</span>
+          {done && row.messageCount > 0 && (
+            <>
+              <span>·</span>
+              <span>{row.messageCount} הודעות</span>
+            </>
+          )}
+        </div>
+        {isWorking ? (
+          <p className="text-sm text-muted-foreground italic pt-0.5">
+            שולף את ההתכתבות מ-Gmail ומחלץ פרטים...
+          </p>
+        ) : failed ? (
+          <p className="text-sm text-destructive/90 line-clamp-2 leading-snug pt-0.5">
+            {row.error ?? "שגיאה לא ידועה"}
+          </p>
+        ) : summary ? (
+          <p className="text-sm text-foreground/85 line-clamp-3 leading-snug pt-0.5 whitespace-pre-line">
+            {summary}
+          </p>
+        ) : (
+          <p className="text-sm text-muted-foreground italic pt-0.5">
+            פתח לסקירה
+          </p>
+        )}
+      </div>
+      {done && <ChevronLeft className="size-5 text-muted-foreground shrink-0 mt-1" />}
+    </div>
+  );
+
+  return (
+    <article className="bg-card border border-border/70 rounded-2xl shadow-soft overflow-hidden">
+      {done ? (
+        <Link
+          href={linkHref}
+          className="press block p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label="פתח לאישור"
+        >
+          {body}
+        </Link>
+      ) : (
+        <div className="p-4">{body}</div>
+      )}
+
+      <div className="border-t border-border/60 bg-muted/30 px-2 py-1.5 flex items-center gap-1">
+        {merge && done && (
+          <form action={merge} className="flex-1">
+            <button
+              type="submit"
+              className="press w-full h-11 px-3 rounded-full bg-primary text-primary-foreground text-sm font-semibold flex items-center justify-center gap-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              <Sparkles className="size-4" strokeWidth={2.2} />
+              מזג ועבד מחדש
+            </button>
+          </form>
+        )}
+        {!merge && <div className="flex-1" />}
         <form action={dismiss}>
           <button
             type="submit"

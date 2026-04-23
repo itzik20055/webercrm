@@ -4,6 +4,7 @@ import {
   followups,
   leads,
   pendingCallRecordings,
+  pendingEmails,
   pendingWhatsAppImports,
 } from "@/db";
 
@@ -24,7 +25,7 @@ export async function getQueueCount(): Promise<number> {
  * Drives the /inbox tab badge.
  */
 export async function getInboxCount(): Promise<number> {
-  const [[pendingRow], [reviewRow], [waRow]] = await Promise.all([
+  const [[pendingRow], [reviewRow], [waRow], [emailRow]] = await Promise.all([
     db
       .select({ c: sql<number>`count(*)::int` })
       .from(pendingCallRecordings)
@@ -44,6 +45,22 @@ export async function getInboxCount(): Promise<number> {
           "failed",
         ])
       ),
+    db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(pendingEmails)
+      .where(
+        inArray(pendingEmails.status, [
+          "pending",
+          "processing",
+          "done",
+          "failed",
+        ])
+      ),
   ]);
-  return (pendingRow?.c ?? 0) + (reviewRow?.c ?? 0) + (waRow?.c ?? 0);
+  return (
+    (pendingRow?.c ?? 0) +
+    (reviewRow?.c ?? 0) +
+    (waRow?.c ?? 0) +
+    (emailRow?.c ?? 0)
+  );
 }

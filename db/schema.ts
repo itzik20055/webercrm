@@ -86,6 +86,13 @@ export const leads = pgTable(
     name: text().notNull(),
     phone: text().notNull(),
     email: text(),
+    /**
+     * Additional email addresses watched for this lead. Every address here
+     * (plus the primary `email` field) is scanned by the email sync cron for
+     * new messages. Added via the email-import flow when the user merges a
+     * second address into an existing lead.
+     */
+    aliasEmails: text().array().notNull().default(sql`'{}'::text[]`),
     language: languageEnum().notNull().default("he"),
     audience: audienceEnum().notNull().default("israeli_haredi"),
     channelFirst: channelEnum().notNull().default("whatsapp"),
@@ -158,12 +165,19 @@ export const interactions = pgTable(
     aiSummary: text(),
     aiTags: text().array(),
     durationMin: integer(),
+    /**
+     * For email interactions: the RFC 5322 Message-Id header. Globally unique,
+     * stable, the right key for dedup across IMAP fetches. Null for non-email
+     * interactions (calls, WhatsApp, notes).
+     */
+    messageId: text(),
     occurredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("interactions_lead_idx").on(t.leadId),
     index("interactions_occurred_idx").on(t.occurredAt),
+    uniqueIndex("interactions_message_id_idx").on(t.messageId),
   ]
 );
 
@@ -384,6 +398,80 @@ export const pendingWhatsAppImports = pgTable(
   ]
 );
 
+export const pendingEmailKindEnum = pgEnum("pending_email_kind", [
+  "new_import",
+  "update_batch",
+]);
+
+export const pendingEmailStatusEnum = pgEnum("pending_email_status", [
+  "pending",
+  "processing",
+  "done",
+  "failed",
+  "merged",
+  "dismissed",
+]);
+
+/**
+ * Staging area for email-based inputs. Two kinds share this table:
+ *   - "new_import": the user typed an email address in the app. A worker
+ *     pulls all messages to/from that address since 2026-04-01 from Gmail
+ *     IMAP, runs AI extraction, and parks a "done" row for the inbox UI to
+ *     show as a review card. On approve/merge this becomes a lead +
+ *     interactions.
+ *   - "update_batch": the 4-hour cron found N new messages involving a
+ *     watched address (primary `leads.email` or any `leads.aliasEmails`).
+ *     The `leadId` is known; the row bundles all new messages for one lead
+ *     into a single inbox card. On merge we append interactions and trigger
+ *     an AI reprocess of the full lead history.
+ *
+ * Dedup is on `interactions.messageId` (not here) — this table can legitimately
+ * reference the same Message-Id twice across its lifecycle (e.g., first an
+ * "update_batch" is created, then dismissed, then a second message from the
+ * same thread creates a new update_batch). The interaction-level uniqueIndex
+ * is what stops duplicates ever landing on a lead.
+ */
+export const pendingEmails = pgTable(
+  "pending_emails",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    kind: pendingEmailKindEnum().notNull(),
+    /** Only for kind="new_import": the address the user typed. Lowercased. */
+    emailAddress: text(),
+    /** Only for kind="update_batch": the lead the messages belong to. */
+    leadId: uuid().references(() => leads.id, { onDelete: "cascade" }),
+    status: pendingEmailStatusEnum().notNull().default("pending"),
+    processingStartedAt: timestamp({ withTimezone: true }),
+    processedAt: timestamp({ withTimezone: true }),
+    /** Populated when status transitions to `failed`. */
+    error: text(),
+    /**
+     * Messages fetched from IMAP, normalized. Each:
+     *   { messageId, from, to, subject, bodyText, receivedAt, direction }
+     * Stored denormalized on the pending row so the review page can render
+     * without touching IMAP again.
+     */
+    messages: jsonb().notNull().default(sql`'[]'::jsonb`),
+    /** Only for kind="new_import": AI-extracted lead profile (ExtractedLead shape). */
+    extraction: jsonb(),
+    /** Only for kind="new_import": lead IDs matching name/phone found in the thread. */
+    matchCandidateIds: uuid().array().notNull().default(sql`'{}'::uuid[]`),
+    messageCount: integer().notNull().default(0),
+    firstMessageAt: timestamp({ withTimezone: true }),
+    lastMessageAt: timestamp({ withTimezone: true }),
+    /** If user approved/merged, the resulting/target lead. */
+    resolvedLeadId: uuid().references(() => leads.id, { onDelete: "set null" }),
+    resolvedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("pending_emails_status_idx").on(t.status),
+    index("pending_emails_created_idx").on(t.createdAt),
+    index("pending_emails_lead_idx").on(t.leadId),
+    index("pending_emails_kind_idx").on(t.kind),
+  ]
+);
+
 export const appSettings = pgTable("app_settings", {
   key: text().primaryKey(),
   value: text().notNull(),
@@ -442,6 +530,8 @@ export type PendingCallRecording = typeof pendingCallRecordings.$inferSelect;
 export type NewPendingCallRecording = typeof pendingCallRecordings.$inferInsert;
 export type PendingWhatsAppImport = typeof pendingWhatsAppImports.$inferSelect;
 export type NewPendingWhatsAppImport = typeof pendingWhatsAppImports.$inferInsert;
+export type PendingEmail = typeof pendingEmails.$inferSelect;
+export type NewPendingEmail = typeof pendingEmails.$inferInsert;
 
 export const LANGUAGE_LABELS: Record<Lead["language"], string> = {
   he: "עברית",

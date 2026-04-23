@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Mic,
+  Mail,
   UserPlus,
   UserCheck,
   Phone as PhoneIcon,
@@ -26,6 +27,8 @@ import {
   approvePendingExtraction,
   approveCallRecording,
   mergeCallRecording,
+  approveEmailImport,
+  mergeEmailImport,
 } from "@/app/(app)/inbox/actions";
 
 export interface ExtractedLeadData {
@@ -92,6 +95,14 @@ export type ReviewMode =
       transcriptPreview: string | null;
       callAtLabel: string;
       direction: "in" | "out";
+    }
+  | {
+      kind: "email-import";
+      pendingId: string;
+      inferredName: string | null;
+      emailAddress: string;
+      existingMatches: ExistingMatch[];
+      messageCount: number;
     };
 
 export function LeadReviewForm({
@@ -102,7 +113,11 @@ export function LeadReviewForm({
   mode: ReviewMode;
 }) {
   const [mergeWith, setMergeWith] = useState<string | null>(() => {
-    if (mode.kind === "import" || mode.kind === "call") {
+    if (
+      mode.kind === "import" ||
+      mode.kind === "call" ||
+      mode.kind === "email-import"
+    ) {
       if (
         mode.existingMatches.length === 1 &&
         mode.existingMatches[0].name.trim() === (mode.inferredName ?? "").trim()
@@ -117,6 +132,8 @@ export function LeadReviewForm({
       return mode.inferredName ?? extracted.customerName ?? "";
     if (mode.kind === "call")
       return mode.inferredName ?? extracted.customerName ?? "";
+    if (mode.kind === "email-import")
+      return mode.inferredName ?? extracted.customerName ?? "";
     // For auto-created leads from call recordings, name === phone is a
     // placeholder — prefer the AI-extracted name from the conversation.
     const isPlaceholder = mode.leadName === mode.leadPhone;
@@ -126,6 +143,7 @@ export function LeadReviewForm({
   const [phone, setPhone] = useState(() => {
     if (mode.kind === "import") return mode.inferredPhone ?? "";
     if (mode.kind === "call") return mode.inferredPhone;
+    if (mode.kind === "email-import") return "";
     return mode.leadPhone;
   });
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +174,13 @@ export function LeadReviewForm({
             await mergeCallRecording(mode.pendingId, formData);
           } else {
             await approveCallRecording(mode.pendingId, formData);
+          }
+        } else if (mode.kind === "email-import") {
+          if (mergeWith) {
+            formData.set("leadId", mergeWith);
+            await mergeEmailImport(mode.pendingId, formData);
+          } else {
+            await approveEmailImport(mode.pendingId, formData);
           }
         } else {
           await approvePendingExtraction(mode.leadId, formData);
@@ -219,7 +244,24 @@ export function LeadReviewForm({
         </div>
       </div>
 
-      {(mode.kind === "import" || mode.kind === "call") &&
+      {mode.kind === "email-import" && (
+        <div className="rounded-xl bg-primary-soft border border-primary/20 p-3 text-sm flex items-start gap-2">
+          <Mail className="size-4 text-primary mt-0.5 shrink-0" />
+          <div>
+            <div>
+              ייבוא מייל ·{" "}
+              <strong dir="ltr">{mode.emailAddress}</strong>
+            </div>
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {mode.messageCount} הודעות מה-1 באפריל 2026 והלאה
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(mode.kind === "import" ||
+        mode.kind === "call" ||
+        mode.kind === "email-import") &&
         mode.existingMatches.length > 0 && (
         <Section title="לידים דומים במערכת">
           <p className="text-xs text-muted-foreground">
@@ -271,7 +313,10 @@ export function LeadReviewForm({
 
       <Section
         title={
-          (mode.kind === "import" || mode.kind === "call") && mergeWith
+          (mode.kind === "import" ||
+            mode.kind === "call" ||
+            mode.kind === "email-import") &&
+          mergeWith
             ? "פרטים שיתעדכנו"
             : "פרטי ליד"
         }

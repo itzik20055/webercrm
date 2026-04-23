@@ -1,16 +1,20 @@
 import Link from "next/link";
-import { ChevronRight, MessageCircle } from "lucide-react";
+import { ChevronRight, MessageCircle, Mail } from "lucide-react";
 import { getSetting } from "@/lib/settings";
 import { ImportClient } from "./import-client";
+import { ImportEmailClient } from "./import-email-client";
 
 export const dynamic = "force-dynamic";
 
-export default async function ImportWhatsAppPage() {
+export default async function ImportLeadPage() {
   const myName = await getSetting("whatsapp_display_name");
   const hasGatewayKey = !!process.env.AI_GATEWAY_API_KEY;
+  const hasGmailCreds = !!process.env.GMAIL_USER && !!process.env.GMAIL_APP_PASSWORD;
+
+  const waReady = !!myName && hasGatewayKey;
 
   return (
-    <div className="px-4 pt-4 pb-4 space-y-4">
+    <div className="px-4 pt-4 pb-4 space-y-5">
       <header className="flex items-center justify-between">
         <Link
           href="/leads"
@@ -19,11 +23,11 @@ export default async function ImportWhatsAppPage() {
           <ChevronRight className="size-4" />
           חזרה
         </Link>
-        <h1 className="text-lg font-semibold">ייבוא שיחת וואטסאפ</h1>
+        <h1 className="text-lg font-semibold">ייבוא ליד</h1>
         <div className="w-12" />
       </header>
 
-      {!myName || !hasGatewayKey ? (
+      {(!myName || !hasGatewayKey) && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-2">
           <div className="flex items-center gap-2 font-medium text-amber-900">
             <MessageCircle className="size-4" />
@@ -40,9 +44,39 @@ export default async function ImportWhatsAppPage() {
             לעמוד ההגדרות
           </Link>
         </div>
-      ) : (
-        <ImportClient myName={myName} />
       )}
+
+      <section className="space-y-3">
+        <div className="flex items-center gap-2 px-1">
+          <MessageCircle className="size-4 text-emerald-700 dark:text-emerald-300" />
+          <h2 className="text-[13px] font-bold tracking-tight text-foreground">
+            ייבוא שיחת וואטסאפ
+          </h2>
+        </div>
+        {waReady ? (
+          <ImportClient myName={myName} />
+        ) : (
+          <div className="rounded-xl border bg-muted/40 p-4 text-sm text-muted-foreground">
+            מילוי ההגדרות הנדרשות למעלה יפעיל את הייבוא.
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-3">
+        <div className="flex items-center gap-2 px-1">
+          <Mail className="size-4 text-primary" />
+          <h2 className="text-[13px] font-bold tracking-tight text-foreground">
+            ייבוא התכתבות מייל
+          </h2>
+        </div>
+        {hasGmailCreds && hasGatewayKey ? (
+          <ImportEmailClient />
+        ) : (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            חסר חיבור ל-Gmail (GMAIL_USER ו-GMAIL_APP_PASSWORD ב-env).
+          </div>
+        )}
+      </section>
 
       <details className="rounded-xl border bg-card p-3 text-sm">
         <summary className="font-medium cursor-pointer">איך לייצא צ'אט מוואטסאפ?</summary>
@@ -52,6 +86,18 @@ export default async function ImportWhatsAppPage() {
           <li>Android: ⋮ → עוד → ייצוא צ'אט</li>
           <li>בחר <strong>"כולל מדיה"</strong> כדי שגם הודעות קוליות יתומללו</li>
           <li>שמור את ה-ZIP (Files / Drive / שלח לעצמך) והעלה כאן</li>
+        </ol>
+      </details>
+
+      <details className="rounded-xl border bg-card p-3 text-sm">
+        <summary className="font-medium cursor-pointer">איך עובד ייבוא מייל?</summary>
+        <ol className="text-muted-foreground space-y-2 mt-3 list-decimal list-inside">
+          <li>הזן את כתובת המייל של הלקוח</li>
+          <li>נשלפת כל ההתכתבות איתו (מ-1/4/2026 והלאה, משני הכיוונים)</li>
+          <li>
+            AI מחלץ ליד מהשרשור. הליד מופיע בתיבה לאישור/מיזוג.
+          </li>
+          <li>מרגע שהליד קיים במערכת, כל מייל חדש איתו ייאסף אוטומטית כל 4 שעות.</li>
         </ol>
       </details>
     </div>

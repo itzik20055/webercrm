@@ -5,7 +5,9 @@ export type SettingKey =
   | "whatsapp_display_name"
   | "ai_paused"
   | "call_recordings_paused"
-  | "briefing_last_sent_date";
+  | "briefing_last_sent_date"
+  | "emails_paused"
+  | "emails_last_sync_at";
 
 export async function getSetting(key: SettingKey): Promise<string | null> {
   const rows = await db

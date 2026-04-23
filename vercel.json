@@ -18,6 +18,10 @@
       "schedule": "* * * * *"
     },
     {
+      "path": "/api/cron/emails",
+      "schedule": "0 */4 * * *"
+    },
+    {
       "path": "/api/cron/learning",
       "schedule": "0 3 * * *"
     }
