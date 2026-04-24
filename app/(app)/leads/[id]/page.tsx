@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import {
   ChevronRight,
+  ChevronDown,
   Phone,
   MessageCircle,
   Mail,
@@ -14,6 +15,7 @@ import {
   Languages,
   Globe,
   AlertTriangle,
+  Settings2,
 } from "lucide-react";
 import { db, leads, interactions, followups } from "@/db";
 import { eq, desc, and, isNull } from "drizzle-orm";
@@ -182,37 +184,112 @@ export default async function LeadPage({
           {lead.source && <Chip>מקור: {lead.source}</Chip>}
         </div>
 
-        <Card title="סטטוס">
+        <DraftCard leadId={lead.id} leadPhone={lead.phone} />
+
+        <Collapsible
+          title="פרטי הנופש"
+          icon={<Calendar className="size-4" />}
+        >
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <Row label="מבוגרים" value={lead.numAdults} icon={<Users className="size-3.5" />} />
+            <Row label="ילדים" value={lead.numChildren} />
+            {lead.agesChildren && (
+              <div className="col-span-2">
+                <dt className="text-xs text-muted-foreground">גילי ילדים</dt>
+                <dd>{lead.agesChildren}</dd>
+              </div>
+            )}
+            <Row label="תאריכים" value={lead.datesInterest} className="col-span-2" />
+            <Row label="חדר" value={lead.roomTypeInterest} className="col-span-2" />
+            <Row
+              label="בניין"
+              value={
+                lead.buildingPref === "a"
+                  ? "A"
+                  : lead.buildingPref === "b"
+                    ? "B"
+                    : lead.buildingPref === "any"
+                      ? "לא משנה"
+                      : null
+              }
+              icon={<Building2 className="size-3.5" />}
+            />
+            <Row
+              label="תקציב"
+              value={
+                lead.budgetSignal === "low"
+                  ? "נמוך"
+                  : lead.budgetSignal === "mid"
+                    ? "בינוני"
+                    : lead.budgetSignal === "high"
+                      ? "גבוה"
+                      : null
+              }
+            />
+            <Row
+              label="איפה היה בעבר"
+              value={lead.previousStays}
+              className="col-span-2"
+            />
+          </dl>
+          <div className="text-xs">
+            <Link
+              href={`/leads/${id}/edit`}
+              className="text-primary font-medium press"
+            >
+              ערוך פרטים
+            </Link>
+          </div>
+
+          <SubSectionDivider />
+          <SubHeader>מה תפס אותו</SubHeader>
+          <InterestTags leadId={lead.id} selected={lead.interestTags ?? []} />
+          {lead.whatSpokeToThem && (
+            <p className="text-sm mt-2 whitespace-pre-wrap">
+              {lead.whatSpokeToThem}
+            </p>
+          )}
+
+          {lead.objections && (
+            <>
+              <SubSectionDivider />
+              <SubHeader>התנגדויות</SubHeader>
+              <p className="text-sm whitespace-pre-wrap">{lead.objections}</p>
+            </>
+          )}
+        </Collapsible>
+
+        <Collapsible
+          title="סטטוס וניהול"
+          icon={<Settings2 className="size-4" />}
+        >
           <StatusPicker leadId={lead.id} current={lead.status} />
           <div className="mt-3">
             <div className="text-xs text-muted-foreground mb-1.5">עדיפות</div>
             <PriorityPicker leadId={lead.id} current={lead.priority} />
           </div>
-        </Card>
 
-        <Card
-          title="פולואפ"
-          icon={<BellRing className="size-4" />}
-          action={
+          <SubSectionDivider />
+          <div className="flex items-center justify-between">
+            <SubHeader className="mb-0">
+              <BellRing className="size-3.5" />
+              פולואפ
+            </SubHeader>
             <Link
               href={`/leads/${id}/followup`}
               className="text-xs font-medium text-primary"
             >
               קבע חדש
             </Link>
-          }
-        >
+          </div>
           {openFollowups.length === 0 ? (
-            <p className="text-sm text-muted-foreground">אין פולואפ קבוע</p>
+            <p className="text-sm text-muted-foreground mt-2">אין פולואפ קבוע</p>
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-2 mt-2">
               {openFollowups.map((f) => {
                 const overdue = new Date(f.dueAt) < new Date();
                 return (
-                  <li
-                    key={f.id}
-                    className="flex items-center justify-between gap-2"
-                  >
+                  <li key={f.id} className="flex items-center justify-between gap-2">
                     <div>
                       <div
                         className={
@@ -246,89 +323,7 @@ export default async function LeadPage({
               })}
             </ul>
           )}
-        </Card>
-
-        <DraftCard leadId={lead.id} leadPhone={lead.phone} />
-
-        <Card
-          title="פרטי הנופש"
-          icon={<Calendar className="size-4" />}
-          action={
-            <Link
-              href={`/leads/${id}/edit`}
-              className="text-xs font-medium text-primary"
-            >
-              ערוך
-            </Link>
-          }
-        >
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-            <Row label="מבוגרים" value={lead.numAdults} icon={<Users className="size-3.5" />} />
-            <Row label="ילדים" value={lead.numChildren} />
-            {lead.agesChildren && (
-              <div className="col-span-2">
-                <dt className="text-xs text-muted-foreground">גילי ילדים</dt>
-                <dd>{lead.agesChildren}</dd>
-              </div>
-            )}
-            <Row label="תאריכים" value={lead.datesInterest} className="col-span-2" />
-            <Row
-              label="חדר"
-              value={lead.roomTypeInterest}
-              className="col-span-2"
-            />
-            <Row
-              label="בניין"
-              value={
-                lead.buildingPref === "a"
-                  ? "A"
-                  : lead.buildingPref === "b"
-                    ? "B"
-                    : lead.buildingPref === "any"
-                      ? "לא משנה"
-                      : null
-              }
-              icon={<Building2 className="size-3.5" />}
-            />
-            <Row
-              label="תקציב"
-              value={
-                lead.budgetSignal === "low"
-                  ? "נמוך"
-                  : lead.budgetSignal === "mid"
-                    ? "בינוני"
-                    : lead.budgetSignal === "high"
-                      ? "גבוה"
-                      : null
-              }
-            />
-            <Row
-              label="איפה היה בעבר"
-              value={lead.previousStays}
-              className="col-span-2"
-            />
-          </dl>
-        </Card>
-
-        <Card title="מה תפס אותו">
-          <InterestTags leadId={lead.id} selected={lead.interestTags ?? []} />
-          {lead.whatSpokeToThem && (
-            <p className="text-sm mt-3 whitespace-pre-wrap">
-              {lead.whatSpokeToThem}
-            </p>
-          )}
-          <div className="text-xs text-muted-foreground mt-2">
-            <Link href={`/leads/${id}/edit`} className="text-primary">
-              {lead.whatSpokeToThem ? "ערוך" : "הוסף הערה"}
-            </Link>
-          </div>
-        </Card>
-
-        {lead.objections && (
-          <Card title="התנגדויות">
-            <p className="text-sm whitespace-pre-wrap">{lead.objections}</p>
-          </Card>
-        )}
+        </Collapsible>
 
         {lead.notes && (
           <Card title="הערות">
@@ -336,14 +331,10 @@ export default async function LeadPage({
           </Card>
         )}
 
-        <Card
+        <Collapsible
           title="היסטוריית שיחות"
           icon={<MessageSquarePlus className="size-4" />}
-          action={
-            <a href="#capture" className="text-xs font-medium text-primary">
-              + תיעוד חדש
-            </a>
-          }
+          count={recentInteractions.length}
         >
           {recentInteractions.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -353,30 +344,37 @@ export default async function LeadPage({
               </a>
             </p>
           ) : (
-            <ul className="space-y-3">
-              {recentInteractions.map((i) => (
-                <li key={i.id} className="border-r-2 border-primary/40 pr-3">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">
-                      {INTERACTION_TYPE_LABELS[i.type]}
-                    </span>
-                    <span>·</span>
-                    <span>{relativeTime(i.occurredAt)}</span>
-                    {i.durationMin != null && (
-                      <>
-                        <span>·</span>
-                        <span>{i.durationMin} דק׳</span>
-                      </>
-                    )}
-                  </div>
-                  <p className="text-sm mt-1 whitespace-pre-wrap line-clamp-6">
-                    {i.content}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-3">
+                {recentInteractions.map((i) => (
+                  <li key={i.id} className="border-r-2 border-primary/40 pr-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">
+                        {INTERACTION_TYPE_LABELS[i.type]}
+                      </span>
+                      <span>·</span>
+                      <span>{relativeTime(i.occurredAt)}</span>
+                      {i.durationMin != null && (
+                        <>
+                          <span>·</span>
+                          <span>{i.durationMin} דק׳</span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-sm mt-1 whitespace-pre-wrap line-clamp-6">
+                      {i.content}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <div className="text-xs mt-3">
+                <a href="#capture" className="text-primary font-medium press">
+                  + תיעוד חדש
+                </a>
+              </div>
+            </>
           )}
-        </Card>
+        </Collapsible>
       </div>
 
       <LeadQuickActions leadId={lead.id} />
@@ -407,6 +405,67 @@ function Card({
       {children}
     </section>
   );
+}
+
+function Collapsible({
+  title,
+  icon,
+  count,
+  defaultOpen,
+  children,
+}: {
+  title: string;
+  icon?: React.ReactNode;
+  count?: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className="group bg-card border border-border/70 rounded-2xl shadow-soft overflow-hidden"
+    >
+      <summary className="list-none cursor-pointer px-4 py-3 flex items-center justify-between gap-2 select-none hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+        <h2 className="font-bold text-[13px] tracking-tight text-muted-foreground flex items-center gap-1.5">
+          {icon}
+          <span className="text-foreground">{title}</span>
+          {count != null && (
+            <span className="inline-flex items-center px-1.5 py-0 rounded-full text-[10.5px] font-semibold bg-secondary text-secondary-foreground tabular-nums">
+              {count}
+            </span>
+          )}
+        </h2>
+        <ChevronDown
+          className="size-4 text-muted-foreground transition-transform group-open:rotate-180 shrink-0"
+          strokeWidth={2.4}
+        />
+      </summary>
+      <div className="border-t border-border/60 p-4 space-y-3">{children}</div>
+    </details>
+  );
+}
+
+function SubHeader({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <h3
+      className={
+        "font-semibold text-[12px] tracking-tight text-muted-foreground flex items-center gap-1.5 mb-2 " +
+        (className ?? "")
+      }
+    >
+      {children}
+    </h3>
+  );
+}
+
+function SubSectionDivider() {
+  return <div className="h-px bg-border/60 my-4 -mx-4" />;
 }
 
 function Chip({
