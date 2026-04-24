@@ -7,21 +7,9 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { smartDate, telLink, whatsappLink } from "@/lib/format";
-import { STATUS_LABELS } from "@/db/schema";
+import { StatusFilters } from "./status-filters";
 
 export const dynamic = "force-dynamic";
-
-const STATUS_FILTERS = [
-  { v: "all", l: "הכל" },
-  { v: "active", l: "פעילים" },
-  { v: "new", l: "חדשים" },
-  { v: "contacted", l: "בקשר" },
-  { v: "interested", l: "מתעניינים" },
-  { v: "quoted", l: "הצעה" },
-  { v: "closing", l: "בסגירה" },
-  { v: "booked", l: "נסגרו" },
-  { v: "lost", l: "אבד" },
-] as const;
 
 export default async function LeadsListPage({
   searchParams,
@@ -110,35 +98,14 @@ export default async function LeadsListPage({
         {priorityFilter && <input type="hidden" name="priority" value={priorityFilter} />}
       </form>
 
-      <div className="flex gap-2 overflow-x-auto -mx-4 px-4 pb-1 scrollbar-hide">
-        {STATUS_FILTERS.map((f) => {
-          const active = f.v === statusFilter || (!statusFilter && f.v === "active");
-          const params = new URLSearchParams();
-          if (q) params.set("q", q);
-          params.set("status", f.v);
-          if (priorityFilter) params.set("priority", priorityFilter);
-          return (
-            <Link
-              key={f.v}
-              href={`/leads?${params}`}
-              aria-current={active ? "page" : undefined}
-              className={
-                "press px-3.5 h-9 rounded-full text-[13px] font-semibold whitespace-nowrap flex items-center transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background " +
-                (active
-                  ? "bg-primary text-primary-foreground shadow-soft"
-                  : "bg-card border border-border text-muted-foreground")
-              }
-            >
-              {f.l}
-            </Link>
-          );
-        })}
-      </div>
+      <StatusFilters q={q} priority={priorityFilter} active={statusFilter} />
 
       <p className="text-xs font-medium text-muted-foreground px-1 tabular-nums">
         {truncated
-          ? `מציג ${shown} מתוך ${total} — חפש או סנן כדי לצמצם`
-          : `${total} לידים`}
+          ? `מציג ${shown} מתוך ${total} - חפש או סנן כדי לצמצם`
+          : total === 1
+            ? "ליד אחד"
+            : `${total} לידים`}
       </p>
 
       <div className="space-y-2">
