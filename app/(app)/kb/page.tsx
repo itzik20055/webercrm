@@ -13,6 +13,7 @@ import {
   Plane,
   HelpCircle,
   EyeOff,
+  Brain,
 } from "lucide-react";
 import { KbToggle } from "./toggle";
 import { RulesEditor } from "@/components/rules-editor";
@@ -71,13 +72,22 @@ export default async function KbPage() {
             כללים גלובליים + ידע על המוצר. ה-AI ניזון מכל מה שכאן.
           </p>
         </div>
-        <Link
-          href="/kb/new"
-          className="press inline-flex items-center gap-1.5 h-11 px-4 rounded-full bg-primary text-primary-foreground text-sm font-semibold shadow-card shrink-0"
-        >
-          <Plus className="size-[18px]" strokeWidth={2.5} />
-          חדש
-        </Link>
+        <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href="/kb/learning"
+            className="press inline-flex items-center gap-1.5 h-11 px-3.5 rounded-full bg-card border border-border text-sm font-semibold text-foreground shadow-soft"
+          >
+            <Brain className="size-4 text-primary" />
+            למידה
+          </Link>
+          <Link
+            href="/kb/new"
+            className="press inline-flex items-center gap-1.5 h-11 px-4 rounded-full bg-primary text-primary-foreground text-sm font-semibold shadow-card"
+          >
+            <Plus className="size-[18px]" strokeWidth={2.5} />
+            חדש
+          </Link>
+        </div>
       </header>
 
       <RulesEditor initialRules={rules} />
