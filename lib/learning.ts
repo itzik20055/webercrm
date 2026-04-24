@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { generateObject } from "ai";
 import { z } from "zod";
-import { asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { asc, eq, gt, inArray, sql } from "drizzle-orm";
 import {
   db,
   leads,
@@ -315,60 +315,11 @@ export async function mineLeadConversation(
   return { leadId: lead.id, status: "ok", saved, duplicates };
 }
 
-/**
- * Finds leads whose conversations have changed since the last cursor and mines
- * them. On first run (no cursor), processes all completed-or-active leads up
- * to the limit, oldest-first by last activity (so booked/lost outcomes get
- * mined first since they carry the cleanest signal).
- */
-export async function runLearningPass({
-  leadLimit = 30,
-}: { leadLimit?: number } = {}): Promise<{
-  ok: boolean;
-  cursor: string | null;
-  newCursor: string;
-  processed: MineLeadResult[];
-  durationMs: number;
-}> {
-  const start = Date.now();
-  const cursor = await getLearningCursor();
+async function processCandidates(
+  candidateIds: string[]
+): Promise<MineLeadResult[]> {
+  if (candidateIds.length === 0) return [];
 
-  // Find lead IDs with at least one interaction newer than cursor (or any
-  // interaction if no cursor exists). Order by most recent activity descending
-  // so we mine the freshest signal first.
-  const activitySubquery = db
-    .select({
-      leadId: interactions.leadId,
-      lastActivity: sql<Date>`max(${interactions.occurredAt})`.as("last_activity"),
-    })
-    .from(interactions)
-    .where(cursor ? gt(interactions.occurredAt, cursor) : undefined)
-    .groupBy(interactions.leadId)
-    .as("recent");
-
-  const candidates = await db
-    .select({
-      id: leads.id,
-      lastActivity: activitySubquery.lastActivity,
-    })
-    .from(activitySubquery)
-    .innerJoin(leads, eq(leads.id, activitySubquery.leadId))
-    .orderBy(desc(activitySubquery.lastActivity))
-    .limit(leadLimit);
-
-  if (candidates.length === 0) {
-    const newCursor = new Date(start);
-    await setLearningCursor(newCursor);
-    return {
-      ok: true,
-      cursor: cursor?.toISOString() ?? null,
-      newCursor: newCursor.toISOString(),
-      processed: [],
-      durationMs: Date.now() - start,
-    };
-  }
-
-  const candidateIds = candidates.map((c) => c.id);
   const fullLeads = await db
     .select()
     .from(leads)
@@ -401,14 +352,132 @@ export async function runLearningPass({
       });
     }
   }
+  return processed;
+}
 
-  const newCursor = new Date(start);
+/**
+ * Finds leads whose conversations have changed since the last cursor and mines
+ * them. Processed oldest-activity-first so that when the leadLimit cap is hit,
+ * the cursor only advances past the frontier we actually processed — leaving
+ * newer-but-unprocessed leads for the next run (instead of losing them).
+ */
+export async function runLearningPass({
+  leadLimit = 30,
+}: { leadLimit?: number } = {}): Promise<{
+  ok: boolean;
+  cursor: string | null;
+  newCursor: string;
+  processed: MineLeadResult[];
+  durationMs: number;
+}> {
+  const start = Date.now();
+  const cursor = await getLearningCursor();
+
+  const activitySubquery = db
+    .select({
+      leadId: interactions.leadId,
+      lastActivity: sql<Date>`max(${interactions.occurredAt})`.as("last_activity"),
+    })
+    .from(interactions)
+    .where(cursor ? gt(interactions.occurredAt, cursor) : undefined)
+    .groupBy(interactions.leadId)
+    .as("recent");
+
+  const candidates = await db
+    .select({
+      id: leads.id,
+      lastActivity: activitySubquery.lastActivity,
+    })
+    .from(activitySubquery)
+    .innerJoin(leads, eq(leads.id, activitySubquery.leadId))
+    .orderBy(asc(activitySubquery.lastActivity), asc(leads.id))
+    .limit(leadLimit);
+
+  if (candidates.length === 0) {
+    const newCursor = new Date(start);
+    await setLearningCursor(newCursor);
+    return {
+      ok: true,
+      cursor: cursor?.toISOString() ?? null,
+      newCursor: newCursor.toISOString(),
+      processed: [],
+      durationMs: Date.now() - start,
+    };
+  }
+
+  const processed = await processCandidates(candidates.map((c) => c.id));
+
+  // If we drained the queue (fewer candidates than the cap), jump to `start`.
+  // Otherwise, advance only up to the newest activity we actually processed,
+  // minus 1ms so any lead tied on the boundary is re-caught next run.
+  // Hash dedup in mineLeadConversation absorbs the re-processing cost.
+  const drained = candidates.length < leadLimit;
+  const maxProcessed = new Date(
+    candidates[candidates.length - 1].lastActivity
+  ).getTime();
+  const newCursor = drained ? new Date(start) : new Date(maxProcessed - 1);
   await setLearningCursor(newCursor);
 
   return {
     ok: true,
     cursor: cursor?.toISOString() ?? null,
     newCursor: newCursor.toISOString(),
+    processed,
+    durationMs: Date.now() - start,
+  };
+}
+
+/**
+ * One-shot backfill over all historical leads, paginated. Ignores the cursor
+ * entirely so it can run alongside the nightly cron without interfering. Use
+ * this to seed voice_examples from conversations that pre-date the cron or
+ * that fell through the cap before the cursor-advance fix.
+ */
+export async function runLearningBackfill({
+  page = 0,
+  size = 30,
+}: { page?: number; size?: number } = {}): Promise<{
+  ok: boolean;
+  page: number;
+  size: number;
+  hasMore: boolean;
+  processed: MineLeadResult[];
+  durationMs: number;
+}> {
+  const start = Date.now();
+  const pageSize = Math.max(1, Math.min(50, size));
+  const offset = Math.max(0, page) * pageSize;
+
+  const activitySubquery = db
+    .select({
+      leadId: interactions.leadId,
+      lastActivity: sql<Date>`max(${interactions.occurredAt})`.as("last_activity"),
+    })
+    .from(interactions)
+    .groupBy(interactions.leadId)
+    .as("recent");
+
+  const batch = await db
+    .select({
+      id: leads.id,
+      lastActivity: activitySubquery.lastActivity,
+    })
+    .from(activitySubquery)
+    .innerJoin(leads, eq(leads.id, activitySubquery.leadId))
+    .orderBy(asc(activitySubquery.lastActivity), asc(leads.id))
+    .limit(pageSize + 1)
+    .offset(offset);
+
+  const hasMore = batch.length > pageSize;
+  const candidates = batch.slice(0, pageSize);
+
+  const processed = await processCandidates(candidates.map((c) => c.id));
+
+  return {
+    ok: true,
+    page,
+    size: pageSize,
+    hasMore,
     processed,
     durationMs: Date.now() - start,
   };
