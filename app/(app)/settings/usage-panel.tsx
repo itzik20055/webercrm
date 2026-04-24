@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db, aiAuditLog, leads } from "@/db";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { AlertTriangle, CircleDollarSign } from "lucide-react";
+import { labelOperation } from "@/lib/ai-op-labels";
 
 const COST_PER_REQ_USD: Record<string, number> = {
   "google/gemini-2.5-pro": 0.08,
@@ -10,15 +11,6 @@ const COST_PER_REQ_USD: Record<string, number> = {
   "anthropic/claude-opus-4-7": 0.25,
   "anthropic/claude-haiku-4-5": 0.005,
   "openai/text-embedding-3-small": 0.0001,
-};
-
-const OP_LABEL: Record<string, string> = {
-  transcribe: "תמלול שיחה",
-  extract: "חילוץ ליד",
-  draft: "ניסוח טיוטה",
-  chat: "צ'אט",
-  learning: "למידה לילית",
-  embed: "אינדוקס",
 };
 
 function fmtUsd(n: number) {
@@ -182,7 +174,7 @@ export async function UsagePanel() {
             >
               <div className="min-w-0">
                 <div className="font-medium">
-                  {OP_LABEL[g.operation] ?? g.operation}
+                  {labelOperation(g.operation)}
                   {g.failed > 0 && (
                     <span className="text-destructive text-[11px] font-semibold ms-1.5">
                       ({g.failed} נכשלו)
@@ -221,7 +213,7 @@ export async function UsagePanel() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium">
-                      {OP_LABEL[f.operation] ?? f.operation}
+                      {labelOperation(f.operation)}
                       {f.leadName && (
                         <span className="text-muted-foreground font-normal">
                           {" · "}

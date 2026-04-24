@@ -2,17 +2,9 @@ import Link from "next/link";
 import { db, aiAuditLog, leads } from "@/db";
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { ChevronRight, AlertTriangle } from "lucide-react";
+import { labelOperation } from "@/lib/ai-op-labels";
 
 export const dynamic = "force-dynamic";
-
-const OP_LABEL: Record<string, string> = {
-  transcribe: "תמלול שיחה",
-  extract: "חילוץ ליד",
-  draft: "ניסוח טיוטה",
-  chat: "צ'אט",
-  learning: "למידה לילית",
-  embed: "אינדוקס",
-};
 
 const OP_OPTIONS: Array<{ value: string; label: string }> = [
   { value: "all", label: "הכל" },
@@ -182,7 +174,7 @@ export default async function AiLogPage({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap text-[12px]">
                       <span className="font-semibold text-[13px]">
-                        {OP_LABEL[r.operation] ?? r.operation}
+                        {labelOperation(r.operation)}
                       </span>
                       {r.error && (
                         <span className="inline-flex items-center gap-1 text-destructive font-medium">
