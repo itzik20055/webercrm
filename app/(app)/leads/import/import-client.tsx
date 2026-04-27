@@ -109,11 +109,17 @@ export function ImportClient({ myName }: { myName: string }) {
       // Direct-to-Blob upload bypasses the 4.5MB Vercel function body limit.
       // The handleUpload route validates auth, returns a token, then we PUT
       // straight to Blob; on completion the same route ingests + queues.
+      //
+      // multipart=false: @vercel/blob defaults to multipart for files >5MB,
+      // but iOS Safari hangs intermittently on a part boundary (the upload
+      // freezes at a fixed % and never resumes). Single-PUT works reliably
+      // for our range; the cleaned ZIP is rarely above 50MB.
       await upload(cleaned.name, cleaned, {
         access: "public",
         handleUploadUrl: "/api/leads/import-whatsapp/upload",
         clientPayload: JSON.stringify({ language, filename: cleaned.name }),
         onUploadProgress: (e) => setProgress(e.percentage),
+        multipart: false,
       });
 
       toast.success("נקלט! העיבוד רץ ברקע — תראה התראה ב-Inbox");
