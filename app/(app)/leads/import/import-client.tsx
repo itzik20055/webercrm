@@ -106,21 +106,46 @@ export function ImportClient({ myName }: { myName: string }) {
       setStatusMessage("מעלה…");
       setProgress(0);
 
-      // Direct-to-Blob upload bypasses the 4.5MB Vercel function body limit.
-      // The handleUpload route validates auth, returns a token, then we PUT
-      // straight to Blob; on completion the same route ingests + queues.
-      //
-      // multipart=false: @vercel/blob defaults to multipart for files >5MB,
-      // but iOS Safari hangs intermittently on a part boundary (the upload
-      // freezes at a fixed % and never resumes). Single-PUT works reliably
-      // for our range; the cleaned ZIP is rarely above 50MB.
-      await upload(cleaned.name, cleaned, {
-        access: "public",
-        handleUploadUrl: "/api/leads/import-whatsapp/upload",
-        clientPayload: JSON.stringify({ language, filename: cleaned.name }),
-        onUploadProgress: (e) => setProgress(e.percentage),
-        multipart: false,
-      });
+      // Hybrid upload: small files go straight through FormData (the path
+      // that worked reliably for months), large files use Vercel Blob to
+      // bypass the 4.5MB function body limit. Cap is conservative — 4MB —
+      // to leave headroom for multipart overhead in the FormData path.
+      const FORMDATA_LIMIT = 4 * 1024 * 1024;
+
+      if (cleaned.size <= FORMDATA_LIMIT) {
+        const fd = new FormData();
+        fd.append("file", cleaned);
+        fd.append("language", language);
+        const res = await fetch("/api/leads/import-whatsapp", {
+          method: "POST",
+          body: fd,
+        });
+        const bodyText = await res.text();
+        let json: { ok?: boolean; error?: string } = {};
+        try {
+          json = JSON.parse(bodyText) as { ok?: boolean; error?: string };
+        } catch {
+          throw new Error(
+            `השרת החזיר תשובה לא תקינה (${res.status}): ${bodyText.slice(0, 300)}`
+          );
+        }
+        if (!res.ok || !json.ok) {
+          throw new Error(json.error ?? `שגיאה בהעלאה (HTTP ${res.status})`);
+        }
+        setProgress(100);
+      } else {
+        // multipart=false: @vercel/blob defaults to multipart for files >5MB,
+        // but iOS WebKit (Safari + Chrome on iPhone, both share the engine)
+        // hangs at a fixed % on a part boundary. Single-PUT works for our
+        // range; the cleaned ZIP rarely tops 50MB.
+        await upload(cleaned.name, cleaned, {
+          access: "public",
+          handleUploadUrl: "/api/leads/import-whatsapp/upload",
+          clientPayload: JSON.stringify({ language, filename: cleaned.name }),
+          onUploadProgress: (e) => setProgress(e.percentage),
+          multipart: false,
+        });
+      }
 
       toast.success("נקלט! העיבוד רץ ברקע — תראה התראה ב-Inbox");
       router.push("/inbox");
