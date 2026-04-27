@@ -11,6 +11,10 @@
   --brand-gold-light: #f4d77c;
   --brand-gold-dark: #b8862d;
 
+  /* Dark surface — used for the bottom nav, stats card, and any "framing"
+     element that should feel like a chrome bar around the light content. */
+  --surface-dark: #111e2f;
+
   --background: #fafbfd;
   --foreground: #0f1a3a;
   --card: #ffffff;

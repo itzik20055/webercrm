@@ -82,7 +82,7 @@ export default function HomePage() {
 async function StatsSection() {
   const counts = await getStats();
   return (
-    <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#1e3a8a] via-[#152a6b] to-[#0c1e6f] text-white p-5 shadow-card">
+    <div className="relative overflow-hidden rounded-[22px] bg-[#111e2f] text-white p-5 shadow-card">
       <div className="absolute -top-16 -left-10 size-44 rounded-full bg-white/8 blur-2xl" />
       <div className="absolute -bottom-20 -right-10 size-52 rounded-full bg-[#f4d77c]/25 blur-3xl" />
       <div className="absolute bottom-3 right-4 left-4 h-px bg-gradient-to-r from-transparent via-[#f4d77c]/40 to-transparent" />
@@ -169,7 +169,7 @@ async function ActionQueueSection() {
 
 function StatsSkeleton() {
   return (
-    <div className="h-[128px] rounded-[22px] bg-gradient-to-br from-[#1e3a8a]/80 via-[#152a6b]/80 to-[#0c1e6f]/80 animate-pulse" />
+    <div className="h-[128px] rounded-[22px] bg-[#111e2f]/80 animate-pulse" />
   );
 }
 
