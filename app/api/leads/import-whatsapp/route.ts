@@ -14,6 +14,12 @@ export const maxDuration = 300;
 const MAX_BYTES = 100 * 1024 * 1024;
 
 export async function POST(req: Request) {
+  const t0 = Date.now();
+  console.log("[whatsapp-import] POST received", {
+    contentType: req.headers.get("content-type"),
+    contentLength: req.headers.get("content-length"),
+  });
+
   try {
     const myName = await getSetting("whatsapp_display_name");
     if (!myName) {
@@ -26,13 +32,32 @@ export async function POST(req: Request) {
       );
     }
 
-    const form = await req.formData();
+    let form: FormData;
+    try {
+      form = await req.formData();
+    } catch (e) {
+      console.error("[whatsapp-import] formData() parse failed", e);
+      return NextResponse.json(
+        {
+          error: `לא הצלחתי לקרוא את הטופס: ${e instanceof Error ? e.message : String(e)}`,
+        },
+        { status: 400 }
+      );
+    }
+
     const file = form.get("file");
     const language = (form.get("language") as "he" | "en" | "yi" | null) ?? null;
 
     if (!(file instanceof File)) {
+      console.error("[whatsapp-import] no file in form", { fileType: typeof file });
       return NextResponse.json({ error: "לא הועלה קובץ." }, { status: 400 });
     }
+    console.log("[whatsapp-import] file received", {
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      language,
+    });
     if (file.size > MAX_BYTES) {
       return NextResponse.json(
         { error: "הקובץ גדול מדי (מקסימום 100MB). ייצא שוב מוואטסאפ ללא מדיה, או מחק הודעות קוליות ישנות מהצ'אט." },
@@ -42,6 +67,11 @@ export async function POST(req: Request) {
 
     const bytes = Buffer.from(await file.arrayBuffer());
     const contentHash = createHash("sha256").update(bytes).digest("hex");
+    console.log("[whatsapp-import] hashed", {
+      bytes: bytes.length,
+      contentHash: contentHash.slice(0, 12),
+      elapsedMs: Date.now() - t0,
+    });
     const isZip =
       file.name.toLowerCase().endsWith(".zip") ||
       file.type === "application/zip" ||
@@ -106,13 +136,21 @@ export async function POST(req: Request) {
       }
     });
 
+    console.log("[whatsapp-import] enqueued", {
+      id,
+      totalElapsedMs: Date.now() - t0,
+    });
     return NextResponse.json(
       { ok: true, id, status: "pending", duplicate: false },
       { status: 202 }
     );
   } catch (e) {
     const message = e instanceof Error ? e.message : "שגיאה לא ידועה";
-    console.error("WhatsApp import enqueue failed:", e);
+    console.error("[whatsapp-import] enqueue failed", {
+      error: e,
+      message,
+      elapsedMs: Date.now() - t0,
+    });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

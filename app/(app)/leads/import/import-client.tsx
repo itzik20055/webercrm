@@ -50,9 +50,23 @@ export function ImportClient({ myName }: { myName: string }) {
         method: "POST",
         body: fd,
       });
-      const json = (await res.json()) as EnqueueResponse;
+
+      // Read body as text first so we can show the user what actually came
+      // back when JSON parsing fails (e.g. when Vercel/CDN returns an HTML
+      // error page that we'd otherwise hide behind a generic browser error).
+      const bodyText = await res.text();
+      let json: EnqueueResponse | null = null;
+      try {
+        json = JSON.parse(bodyText) as EnqueueResponse;
+      } catch {
+        const preview = bodyText.slice(0, 300).replace(/\s+/g, " ").trim();
+        throw new Error(
+          `השרת החזיר תשובה לא תקינה (${res.status}): ${preview || "(ריק)"}`
+        );
+      }
+
       if (!res.ok || !json.ok) {
-        throw new Error(json.error ?? "שגיאה בהעלאה");
+        throw new Error(json.error ?? `שגיאה בהעלאה (HTTP ${res.status})`);
       }
       if (json.duplicate) {
         toast.success("הקובץ כבר הועלה — מפנה אותך לסקירה");
@@ -61,7 +75,9 @@ export function ImportClient({ myName }: { myName: string }) {
       }
       router.push("/inbox");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[whatsapp-import] upload failed:", err);
+      setError(message);
       setSubmitting(false);
     }
   }
