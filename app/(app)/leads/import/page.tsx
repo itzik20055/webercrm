@@ -87,6 +87,14 @@ export default async function ImportLeadPage() {
           <li>בחר <strong>"כולל מדיה"</strong> כדי שגם הודעות קוליות יתומללו</li>
           <li>שמור את ה-ZIP (Files / Drive / שלח לעצמך) והעלה כאן</li>
         </ol>
+        <p className="text-muted-foreground mt-3 leading-relaxed">
+          <strong>הקובץ גדול מ-50MB?</strong> שיחות עם הרבה הודעות קוליות מגיעות
+          לעיתים ל-100MB+ (ZIP לא מצמצם קבצי אודיו דחוסים). פתרונות:
+        </p>
+        <ul className="text-muted-foreground space-y-1 mt-1 list-disc list-inside">
+          <li>ייצא <strong>"ללא מדיה"</strong> (טקסט בלבד, מהיר וקטן - אבל בלי תמלול קולי)</li>
+          <li>מחק הודעות קוליות ישנות מהצ'אט עצמו ואז ייצא מחדש</li>
+        </ul>
       </details>
 
       <details className="rounded-xl border bg-card p-3 text-sm">

@@ -14,6 +14,12 @@ interface EnqueueResponse {
   error?: string;
 }
 
+const MAX_BYTES = 50 * 1024 * 1024;
+
+function formatMB(bytes: number) {
+  return (bytes / 1024 / 1024).toFixed(1);
+}
+
 export function ImportClient({ myName }: { myName: string }) {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
@@ -21,9 +27,17 @@ export function ImportClient({ myName }: { myName: string }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const tooLarge = file && file.size > MAX_BYTES;
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
+    if (file.size > MAX_BYTES) {
+      setError(
+        `הקובץ ${formatMB(file.size)}MB - מעל המקסימום של 50MB. ייצא שוב מוואטסאפ ללא מדיה, או מחק הודעות קוליות ישנות מהצ'אט ונסה שוב.`
+      );
+      return;
+    }
     setError(null);
     setSubmitting(true);
 
@@ -60,11 +74,21 @@ export function ImportClient({ myName }: { myName: string }) {
           <strong className="text-foreground">{myName}</strong>
         </div>
 
-        <label className="flex items-center justify-center w-full h-32 rounded-xl border-2 border-dashed cursor-pointer hover:bg-accent focus-within:ring-2 focus-within:ring-primary/40">
+        <label
+          className={
+            "flex items-center justify-center w-full h-32 rounded-xl border-2 border-dashed cursor-pointer focus-within:ring-2 focus-within:ring-primary/40 " +
+            (tooLarge
+              ? "border-destructive/50 bg-destructive/5"
+              : "hover:bg-accent")
+          }
+        >
           <input
             type="file"
             accept=".zip,.txt"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            onChange={(e) => {
+              setError(null);
+              setFile(e.target.files?.[0] ?? null);
+            }}
             className="sr-only"
             disabled={submitting}
           />
@@ -73,9 +97,21 @@ export function ImportClient({ myName }: { myName: string }) {
             <div className="text-sm font-medium">
               {file ? file.name : "בחר קובץ ZIP מוואטסאפ"}
             </div>
-            <div className="text-xs text-muted-foreground">
-              .zip (כולל מדיה) או .txt · עד 25MB
-            </div>
+            {file ? (
+              <div
+                className={
+                  "text-xs tabular-nums " +
+                  (tooLarge ? "text-destructive font-semibold" : "text-muted-foreground")
+                }
+              >
+                {formatMB(file.size)}MB
+                {tooLarge && " - גדול מדי (מקס׳ 50MB)"}
+              </div>
+            ) : (
+              <div className="text-xs text-muted-foreground">
+                .zip (כולל מדיה) או .txt · עד 50MB
+              </div>
+            )}
           </div>
         </label>
 
@@ -118,7 +154,7 @@ export function ImportClient({ myName }: { myName: string }) {
 
       <button
         type="submit"
-        disabled={!file || submitting}
+        disabled={!file || submitting || Boolean(tooLarge)}
         className="press w-full h-12 rounded-full bg-primary text-primary-foreground font-semibold disabled:opacity-50 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 flex items-center justify-center gap-2"
       >
         {submitting && <Loader2 className="size-4 animate-spin" />}
