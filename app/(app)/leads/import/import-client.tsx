@@ -8,9 +8,53 @@ import { Upload, Loader2, AlertCircle } from "lucide-react";
 import { LANGUAGE_LABELS } from "@/db/schema";
 
 const MAX_BYTES = 100 * 1024 * 1024;
+const AUDIO_EXT_RE = /\.(opus|m4a|mp3|ogg|wav|aac)$/i;
 
 function formatMB(bytes: number) {
   return (bytes / 1024 / 1024).toFixed(1);
+}
+
+/**
+ * Strip images/videos from a WhatsApp ZIP before upload — the AI only ever
+ * looks at the chat text + audio transcripts, so any other media just costs
+ * bandwidth and Blob storage. Returns a new (typically much smaller) File.
+ * Plain .txt files pass through untouched.
+ */
+async function stripMediaFromZip(
+  file: File,
+  onStatus: (message: string) => void
+): Promise<{ file: File; stripped: number; originalSize: number }> {
+  if (!file.name.toLowerCase().endsWith(".zip")) {
+    return { file, stripped: 0, originalSize: file.size };
+  }
+  const { default: JSZip } = await import("jszip");
+  onStatus("מנקה תמונות וסרטונים…");
+  const original = await JSZip.loadAsync(file);
+  const filtered = new JSZip();
+
+  let stripped = 0;
+  for (const [name, entry] of Object.entries(original.files)) {
+    if (entry.dir) continue;
+    const lower = name.toLowerCase();
+    const keep = lower.endsWith(".txt") || AUDIO_EXT_RE.test(lower);
+    if (keep) {
+      const data = await entry.async("uint8array");
+      filtered.file(name, data);
+    } else {
+      stripped++;
+    }
+  }
+
+  if (stripped === 0) {
+    return { file, stripped: 0, originalSize: file.size };
+  }
+
+  const blob = await filtered.generateAsync({
+    type: "blob",
+    compression: "DEFLATE",
+  });
+  const cleaned = new File([blob], file.name, { type: "application/zip" });
+  return { file: cleaned, stripped, originalSize: file.size };
 }
 
 export function ImportClient({ myName }: { myName: string }) {
@@ -19,31 +63,56 @@ export function ImportClient({ myName }: { myName: string }) {
   const [language, setLanguage] = useState<"he" | "en" | "yi">("he");
   const [submitting, setSubmitting] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const tooLarge = file && file.size > MAX_BYTES;
+  // Pre-strip size check is deliberately generous — we'll strip media client-
+  // side, and a 200MB ZIP often shrinks to 5-20MB once images/videos are out.
+  const PRE_STRIP_LIMIT = 500 * 1024 * 1024;
+  const tooLarge = file && file.size > PRE_STRIP_LIMIT;
 
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
     if (!file) return;
-    if (file.size > MAX_BYTES) {
+    if (file.size > PRE_STRIP_LIMIT) {
       setError(
-        `הקובץ ${formatMB(file.size)}MB - מעל המקסימום של 100MB. ייצא שוב מוואטסאפ ללא מדיה, או מחק הודעות קוליות ישנות מהצ'אט ונסה שוב.`
+        `הקובץ ${formatMB(file.size)}MB - גדול מדי לעיבוד אפילו אחרי ניקוי מדיה (תקרה ${formatMB(PRE_STRIP_LIMIT)}MB).`
       );
       return;
     }
     setError(null);
     setSubmitting(true);
-    setProgress(0);
+    setProgress(null);
+    setStatusMessage(null);
 
     try {
+      const { file: cleaned, stripped, originalSize } = await stripMediaFromZip(
+        file,
+        setStatusMessage
+      );
+
+      if (stripped > 0) {
+        const before = formatMB(originalSize);
+        const after = formatMB(cleaned.size);
+        toast.success(`הוסרו ${stripped} תמונות/סרטונים — מ-${before}MB ל-${after}MB`);
+      }
+
+      if (cleaned.size > MAX_BYTES) {
+        throw new Error(
+          `אחרי ניקוי המדיה הקובץ עדיין ${formatMB(cleaned.size)}MB (מקסימום ${formatMB(MAX_BYTES)}MB). ככל הנראה יש כמות גדולה מאוד של הודעות קוליות.`
+        );
+      }
+
+      setStatusMessage("מעלה…");
+      setProgress(0);
+
       // Direct-to-Blob upload bypasses the 4.5MB Vercel function body limit.
       // The handleUpload route validates auth, returns a token, then we PUT
       // straight to Blob; on completion the same route ingests + queues.
-      await upload(file.name, file, {
+      await upload(cleaned.name, cleaned, {
         access: "public",
         handleUploadUrl: "/api/leads/import-whatsapp/upload",
-        clientPayload: JSON.stringify({ language, filename: file.name }),
+        clientPayload: JSON.stringify({ language, filename: cleaned.name }),
         onUploadProgress: (e) => setProgress(e.percentage),
       });
 
@@ -55,6 +124,7 @@ export function ImportClient({ myName }: { myName: string }) {
       setError(message);
       setSubmitting(false);
       setProgress(null);
+      setStatusMessage(null);
     }
   }
 
@@ -97,11 +167,11 @@ export function ImportClient({ myName }: { myName: string }) {
                 }
               >
                 {formatMB(file.size)}MB
-                {tooLarge && " - גדול מדי (מקס׳ 100MB)"}
+                {tooLarge && ` - גדול מדי (מקס׳ ${formatMB(PRE_STRIP_LIMIT)}MB)`}
               </div>
             ) : (
               <div className="text-xs text-muted-foreground">
-                .zip (כולל מדיה) או .txt · עד 100MB
+                .zip (כולל מדיה) או .txt · תמונות וסרטונים מסוננים אוטומטית
               </div>
             )}
           </div>
@@ -152,8 +222,8 @@ export function ImportClient({ myName }: { myName: string }) {
         {submitting && <Loader2 className="size-4 animate-spin" />}
         {submitting
           ? progress != null && progress < 100
-            ? `מעלה... ${Math.round(progress)}%`
-            : "מעבד..."
+            ? `מעלה ${Math.round(progress)}%`
+            : statusMessage ?? "מעבד…"
           : "שלח לעיבוד"}
       </button>
 

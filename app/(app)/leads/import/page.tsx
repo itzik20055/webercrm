@@ -88,13 +88,10 @@ export default async function ImportLeadPage() {
           <li>שמור את ה-ZIP (Files / Drive / שלח לעצמך) והעלה כאן</li>
         </ol>
         <p className="text-muted-foreground mt-3 leading-relaxed">
-          <strong>הקובץ גדול מ-100MB?</strong> שיחות ארוכות עם הרבה הודעות
-          קוליות יכולות להגיע לזה (ZIP לא מצמצם קבצי אודיו דחוסים). פתרונות:
+          <strong>תמונות וסרטונים מסוננים אוטומטית בדפדפן</strong> לפני
+          ההעלאה - ה-AI לא צריך אותם, רק טקסט והודעות קוליות. זה מקטין
+          את הקובץ דרמטית (לעיתים מ-50MB ל-3MB) ומאיץ את הייבוא.
         </p>
-        <ul className="text-muted-foreground space-y-1 mt-1 list-disc list-inside">
-          <li>ייצא <strong>"ללא מדיה"</strong> (טקסט בלבד, מהיר וקטן - אבל בלי תמלול קולי)</li>
-          <li>מחק הודעות קוליות ישנות מהצ'אט עצמו ואז ייצא מחדש</li>
-        </ul>
       </details>
 
       <details className="rounded-xl border bg-card p-3 text-sm">
