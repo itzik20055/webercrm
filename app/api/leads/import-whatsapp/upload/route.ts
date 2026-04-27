@@ -32,6 +32,19 @@ interface ClientPayload {
  *      row, queue the worker, and delete the blob.
  */
 export async function POST(req: Request): Promise<NextResponse> {
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    console.error(
+      "[whatsapp-import/upload] BLOB_READ_WRITE_TOKEN not set — enable Vercel Blob in the project's Storage tab and redeploy."
+    );
+    return NextResponse.json(
+      {
+        error:
+          "אחסון ה-Blob לא מופעל בפרויקט. ב-Vercel Dashboard → Storage → Create Database → Blob, ואז Redeploy.",
+      },
+      { status: 500 }
+    );
+  }
+
   const body = (await req.json()) as HandleUploadBody;
 
   try {
