@@ -3,16 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { upload } from "@vercel/blob/client";
 import { Upload, Loader2, AlertCircle } from "lucide-react";
 import { LANGUAGE_LABELS } from "@/db/schema";
-
-interface EnqueueResponse {
-  ok: boolean;
-  id: string;
-  status: "pending" | "processing" | "done" | "failed" | "merged" | "dismissed";
-  duplicate?: boolean;
-  error?: string;
-}
 
 const MAX_BYTES = 100 * 1024 * 1024;
 
@@ -25,6 +18,7 @@ export function ImportClient({ myName }: { myName: string }) {
   const [file, setFile] = useState<File | null>(null);
   const [language, setLanguage] = useState<"he" | "en" | "yi">("he");
   const [submitting, setSubmitting] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const tooLarge = file && file.size > MAX_BYTES;
@@ -40,45 +34,27 @@ export function ImportClient({ myName }: { myName: string }) {
     }
     setError(null);
     setSubmitting(true);
-
-    const fd = new FormData();
-    fd.append("file", file);
-    fd.append("language", language);
+    setProgress(0);
 
     try {
-      const res = await fetch("/api/leads/import-whatsapp", {
-        method: "POST",
-        body: fd,
+      // Direct-to-Blob upload bypasses the 4.5MB Vercel function body limit.
+      // The handleUpload route validates auth, returns a token, then we PUT
+      // straight to Blob; on completion the same route ingests + queues.
+      await upload(file.name, file, {
+        access: "public",
+        handleUploadUrl: "/api/leads/import-whatsapp/upload",
+        clientPayload: JSON.stringify({ language, filename: file.name }),
+        onUploadProgress: (e) => setProgress(e.percentage),
       });
 
-      // Read body as text first so we can show the user what actually came
-      // back when JSON parsing fails (e.g. when Vercel/CDN returns an HTML
-      // error page that we'd otherwise hide behind a generic browser error).
-      const bodyText = await res.text();
-      let json: EnqueueResponse | null = null;
-      try {
-        json = JSON.parse(bodyText) as EnqueueResponse;
-      } catch {
-        const preview = bodyText.slice(0, 300).replace(/\s+/g, " ").trim();
-        throw new Error(
-          `השרת החזיר תשובה לא תקינה (${res.status}): ${preview || "(ריק)"}`
-        );
-      }
-
-      if (!res.ok || !json.ok) {
-        throw new Error(json.error ?? `שגיאה בהעלאה (HTTP ${res.status})`);
-      }
-      if (json.duplicate) {
-        toast.success("הקובץ כבר הועלה — מפנה אותך לסקירה");
-      } else {
-        toast.success("נקלט! העיבוד רץ ברקע — תראה התראה ב-Inbox");
-      }
+      toast.success("נקלט! העיבוד רץ ברקע — תראה התראה ב-Inbox");
       router.push("/inbox");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[whatsapp-import] upload failed:", err);
       setError(message);
       setSubmitting(false);
+      setProgress(null);
     }
   }
 
@@ -174,7 +150,11 @@ export function ImportClient({ myName }: { myName: string }) {
         className="press w-full h-12 rounded-full bg-primary text-primary-foreground font-semibold disabled:opacity-50 shadow-pop focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 flex items-center justify-center gap-2"
       >
         {submitting && <Loader2 className="size-4 animate-spin" />}
-        {submitting ? "שולח..." : "שלח לעיבוד"}
+        {submitting
+          ? progress != null && progress < 100
+            ? `מעלה... ${Math.round(progress)}%`
+            : "מעבד..."
+          : "שלח לעיבוד"}
       </button>
 
       <p className="text-xs text-muted-foreground text-center">
