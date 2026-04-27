@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 // sooner the cron safety net will pick the row up within 1 minute.
 export const maxDuration = 300;
 
-const MAX_BYTES = 50 * 1024 * 1024;
+const MAX_BYTES = 100 * 1024 * 1024;
 
 export async function POST(req: Request) {
   try {
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     }
     if (file.size > MAX_BYTES) {
       return NextResponse.json(
-        { error: "הקובץ גדול מדי (מקסימום 50MB). ייצא שוב מוואטסאפ ללא מדיה, או מחק הודעות קוליות ישנות מהצ'אט." },
+        { error: "הקובץ גדול מדי (מקסימום 100MB). ייצא שוב מוואטסאפ ללא מדיה, או מחק הודעות קוליות ישנות מהצ'אט." },
         { status: 413 }
       );
     }

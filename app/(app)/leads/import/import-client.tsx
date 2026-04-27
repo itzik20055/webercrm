@@ -14,7 +14,7 @@ interface EnqueueResponse {
   error?: string;
 }
 
-const MAX_BYTES = 50 * 1024 * 1024;
+const MAX_BYTES = 100 * 1024 * 1024;
 
 function formatMB(bytes: number) {
   return (bytes / 1024 / 1024).toFixed(1);
@@ -34,7 +34,7 @@ export function ImportClient({ myName }: { myName: string }) {
     if (!file) return;
     if (file.size > MAX_BYTES) {
       setError(
-        `הקובץ ${formatMB(file.size)}MB - מעל המקסימום של 50MB. ייצא שוב מוואטסאפ ללא מדיה, או מחק הודעות קוליות ישנות מהצ'אט ונסה שוב.`
+        `הקובץ ${formatMB(file.size)}MB - מעל המקסימום של 100MB. ייצא שוב מוואטסאפ ללא מדיה, או מחק הודעות קוליות ישנות מהצ'אט ונסה שוב.`
       );
       return;
     }
@@ -105,11 +105,11 @@ export function ImportClient({ myName }: { myName: string }) {
                 }
               >
                 {formatMB(file.size)}MB
-                {tooLarge && " - גדול מדי (מקס׳ 50MB)"}
+                {tooLarge && " - גדול מדי (מקס׳ 100MB)"}
               </div>
             ) : (
               <div className="text-xs text-muted-foreground">
-                .zip (כולל מדיה) או .txt · עד 50MB
+                .zip (כולל מדיה) או .txt · עד 100MB
               </div>
             )}
           </div>

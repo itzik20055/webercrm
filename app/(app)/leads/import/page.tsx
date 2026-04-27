@@ -88,7 +88,7 @@ export default async function ImportLeadPage() {
           <li>שמור את ה-ZIP (Files / Drive / שלח לעצמך) והעלה כאן</li>
         </ol>
         <p className="text-muted-foreground mt-3 leading-relaxed">
-          <strong>הקובץ גדול מ-50MB?</strong> שיחות עם הרבה הודעות קוליות מגיעות
+          <strong>הקובץ גדול מ-100MB?</strong> שיחות עם הרבה הודעות קוליות מגיעות
           לעיתים ל-100MB+ (ZIP לא מצמצם קבצי אודיו דחוסים). פתרונות:
         </p>
         <ul className="text-muted-foreground space-y-1 mt-1 list-disc list-inside">
