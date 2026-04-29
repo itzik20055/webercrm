@@ -6,17 +6,23 @@ import {
   Moon,
   CheckCircle2,
   BellRing,
+  Flame,
 } from "lucide-react";
 import Link from "next/link";
-import { db, leads, followups, type Lead } from "@/db";
-import { asc, eq, isNull } from "drizzle-orm";
+import { db, leads, followups, interactions, type Lead } from "@/db";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { StatusBadge } from "@/components/status-badge";
 import { ResolveFollowupButton } from "@/components/resolve-followup";
 import { fullDate, telLink, whatsappLink } from "@/lib/format";
 import { localTimeLabel, isGoodTimeToCall } from "@/lib/audience-tz";
-import { AUDIENCE_LABELS } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
+
+const PRIORITY_RANK: Record<Lead["priority"], number> = {
+  hot: 0,
+  warm: 1,
+  cold: 2,
+};
 
 export default async function QueuePage() {
   const openFollowups = await db
@@ -29,25 +35,94 @@ export default async function QueuePage() {
       leadPhone: leads.phone,
       leadStatus: leads.status,
       leadAudience: leads.audience,
+      leadPriority: leads.priority,
     })
     .from(followups)
     .innerJoin(leads, eq(followups.leadId, leads.id))
     .where(isNull(followups.completedAt))
     .orderBy(asc(followups.dueAt));
 
-  const now = new Date();
-  const overdue = openFollowups.filter((r) => new Date(r.dueAt) < now);
-  const today = openFollowups.filter((r) => {
-    const d = new Date(r.dueAt);
-    return (
-      d >= now &&
-      d.getDate() === now.getDate() &&
-      d.getMonth() === now.getMonth() &&
-      d.getFullYear() === now.getFullYear()
-    );
+  // Pull the latest INBOUND interaction per involved lead. We use this for
+  // the "what they last said" quote and the "X days silent" hint that lets
+  // Itzik gauge the temperature before opening the lead.
+  const leadIds = [...new Set(openFollowups.map((f) => f.leadId))];
+  const inboundRows = leadIds.length
+    ? await db
+        .select({
+          leadId: interactions.leadId,
+          content: interactions.content,
+          occurredAt: interactions.occurredAt,
+        })
+        .from(interactions)
+        .where(
+          and(
+            inArray(interactions.leadId, leadIds),
+            eq(interactions.direction, "in")
+          )
+        )
+        .orderBy(interactions.leadId, desc(interactions.occurredAt))
+    : [];
+  const latestInboundByLead = new Map<
+    string,
+    { content: string; occurredAt: Date }
+  >();
+  for (const r of inboundRows) {
+    if (!latestInboundByLead.has(r.leadId)) {
+      latestInboundByLead.set(r.leadId, {
+        content: r.content,
+        occurredAt: r.occurredAt,
+      });
+    }
+  }
+
+  const enriched = openFollowups.map((r) => {
+    const inb = latestInboundByLead.get(r.leadId) ?? null;
+    const silenceDays = inb
+      ? Math.floor(
+          (Date.now() - new Date(inb.occurredAt).getTime()) /
+            (1000 * 60 * 60 * 24)
+        )
+      : null;
+    return {
+      ...r,
+      lastInbound: inb,
+      silenceDays,
+    };
   });
-  const upcoming = openFollowups.filter(
-    (r) => !overdue.includes(r) && !today.includes(r)
+
+  // Within each group, surface hot leads first so Itzik triages temperature
+  // before strict due-time order. Same dueAt ordering breaks ties.
+  function sortByPriorityThenDue<
+    T extends { leadPriority: Lead["priority"]; dueAt: Date }
+  >(rows: T[]): T[] {
+    return rows.slice().sort((a, b) => {
+      const p = PRIORITY_RANK[a.leadPriority] - PRIORITY_RANK[b.leadPriority];
+      if (p !== 0) return p;
+      return new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
+    });
+  }
+
+  const now = new Date();
+  const overdue = sortByPriorityThenDue(
+    enriched.filter((r) => new Date(r.dueAt) < now)
+  );
+  const today = sortByPriorityThenDue(
+    enriched.filter((r) => {
+      const d = new Date(r.dueAt);
+      return (
+        d >= now &&
+        d.getDate() === now.getDate() &&
+        d.getMonth() === now.getMonth() &&
+        d.getFullYear() === now.getFullYear()
+      );
+    })
+  );
+  const upcoming = sortByPriorityThenDue(
+    enriched.filter(
+      (r) =>
+        new Date(r.dueAt) >= now &&
+        !today.some((t) => t.id === r.id)
+    )
   );
 
   const total = overdue.length + today.length + upcoming.length;
@@ -187,7 +262,22 @@ type FollowupRowData = {
   leadPhone: string;
   leadStatus: Lead["status"];
   leadAudience: Lead["audience"];
+  leadPriority: Lead["priority"];
+  lastInbound: { content: string; occurredAt: Date } | null;
+  silenceDays: number | null;
 };
+
+function silenceTone(days: number): string {
+  if (days >= 8) return "text-destructive font-semibold";
+  if (days >= 3) return "text-amber-700 dark:text-amber-400 font-semibold";
+  return "text-muted-foreground";
+}
+
+function previewQuote(content: string, max = 90): string {
+  const cleaned = content.replace(/\s+/g, " ").trim();
+  if (cleaned.length <= max) return cleaned;
+  return cleaned.slice(0, max - 1).trimEnd() + "…";
+}
 
 function FollowupRow({
   row,
@@ -199,45 +289,76 @@ function FollowupRow({
   hasOtherOpen?: boolean;
 }) {
   const goodTime = isGoodTimeToCall(row.leadAudience);
+  const isHot = row.leadPriority === "hot";
   return (
-    <div className="bg-card border border-border/70 rounded-2xl p-3.5 space-y-3 shadow-soft">
+    <div
+      className={
+        "rounded-2xl p-3.5 space-y-3 shadow-soft border " +
+        (isHot
+          ? "bg-card border-destructive/40 ring-1 ring-destructive/20"
+          : "bg-card border-border/70")
+      }
+    >
       <Link
         href={`/leads/${row.leadId}`}
         className="press min-w-0 flex-1 block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded-lg"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <span className="font-semibold tracking-tight">{row.leadName}</span>
+          {isHot && (
+            <span
+              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-destructive/12 text-destructive text-[10.5px] font-bold"
+              aria-label="ליד חם"
+            >
+              <Flame className="size-3" strokeWidth={2.4} />
+              חם
+            </span>
+          )}
           <StatusBadge status={row.leadStatus} />
         </div>
-        <div
-          className={
-            "text-sm mt-1 flex items-center gap-1 " +
-            (overdue
-              ? "text-destructive font-semibold"
-              : "text-muted-foreground font-medium")
-          }
-        >
-          {overdue && (
-            <AlertTriangle
-              className="size-3.5 shrink-0"
-              strokeWidth={2.4}
-              aria-label="באיחור"
-            />
+
+        <div className="mt-1 text-sm flex items-center gap-2 flex-wrap">
+          <span
+            className={
+              "flex items-center gap-1 " +
+              (overdue
+                ? "text-destructive font-semibold"
+                : "text-foreground/90 font-medium")
+            }
+          >
+            {overdue && (
+              <AlertTriangle
+                className="size-3.5 shrink-0"
+                strokeWidth={2.4}
+                aria-label="באיחור"
+              />
+            )}
+            {fullDate(row.dueAt)}
+          </span>
+          {row.silenceDays != null && row.silenceDays >= 1 && (
+            <span className={"text-[12px] " + silenceTone(row.silenceDays)}>
+              · שקט {row.silenceDays} ימים
+            </span>
           )}
-          {fullDate(row.dueAt)}
         </div>
+
         {row.reason && (
           <p className="text-sm mt-1.5 text-foreground/90">{row.reason}</p>
         )}
-        <div className="text-[11px] font-medium text-muted-foreground mt-1.5 flex items-center gap-1 flex-wrap">
+
+        {row.lastInbound && (
+          <p className="text-[13px] mt-2 text-muted-foreground border-r-2 border-primary/40 pr-2 italic line-clamp-2">
+            {previewQuote(row.lastInbound.content)}
+          </p>
+        )}
+
+        <div className="text-[11px] font-medium text-muted-foreground mt-2 flex items-center gap-1 flex-wrap">
           {goodTime ? (
             <Sun className="size-3 text-amber-500" aria-hidden="true" />
           ) : (
             <Moon className="size-3 text-muted-foreground" aria-hidden="true" />
           )}
-          <span>
-            {localTimeLabel(row.leadAudience)} · {AUDIENCE_LABELS[row.leadAudience]}
-          </span>
+          <span>{localTimeLabel(row.leadAudience)} אצלו</span>
           {!goodTime && (
             <span className="text-amber-600 font-semibold">
               · לא זמן טוב לחיוג
