@@ -169,8 +169,33 @@ const SYSTEM_PROMPT = `אתה מנתח שיחות מכירה של איציק (א
 - ה־fullMessage חייב להיות **טקסט מילולי** של הודעה אחת של איציק מהתמלול. אל תחבר כמה הודעות.
 - ה־rationale חייב להפנות לתגובת הלקוח. דוגמה טובה: "אחרי ההודעה הזאת הלקוח שאל מיד על מחירי חדרים — סימן חימום ברור."`;
 
+/**
+ * Phone-call transcripts come pre-diarized (`מוכר: ...` / `לקוח: ...` per
+ * turn). When the LLM extracts a "message from איציק" verbatim it tends to
+ * keep the speaker prefix, which then leaks into the saved `finalText` and
+ * the embedding — making phone-derived examples look different from
+ * WhatsApp/email ones in the cosine space. Strip those prefixes before any
+ * hashing/embedding/storage so all sources end up in a comparable form.
+ *
+ * Applied BEFORE hashMessage so dedup keys are stable: a future re-extraction
+ * that captures the same content with or without the prefix still hashes to
+ * the same row.
+ */
+const SPEAKER_PREFIX_RE = /^\s*(?:מוכר|איציק|המוכר|לקוח|seller|customer|me|you)\s*[:：]\s*/i;
+
+export function stripSpeakerPrefix(message: string): string {
+  let out = message;
+  // Loop in case a quote like "מוכר: לקוח: ..." ended up nested somehow.
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(SPEAKER_PREFIX_RE, "");
+    if (next === out) break;
+    out = next;
+  }
+  return out.trim();
+}
+
 function hashMessage(leadId: string, message: string): string {
-  const normalized = message.replace(/\s+/g, " ").trim();
+  const normalized = stripSpeakerPrefix(message).replace(/\s+/g, " ").trim();
   return createHash("sha256")
     .update(`${leadId}::${normalized}`)
     .digest("hex");
@@ -267,7 +292,13 @@ export async function mineLeadConversation(
   for (const msg of mining.scoredMessages) {
     if (!msg.fullMessage?.trim()) continue;
 
-    const hash = hashMessage(lead.id, msg.fullMessage);
+    // Phone transcripts arrive with `מוכר:` / `לקוח:` prefixes the LLM tends to
+    // keep verbatim. Strip before hashing so all sources land in the same
+    // surface form for dedup, anonymization, and embedding.
+    const cleanedMessage = stripSpeakerPrefix(msg.fullMessage);
+    if (!cleanedMessage) continue;
+
+    const hash = hashMessage(lead.id, cleanedMessage);
     const [existing] = await db
       .select({
         id: voiceExamples.id,
@@ -314,7 +345,7 @@ export async function mineLeadConversation(
     // few-shot drafts. Names will be reinjected via deanonymize at draft time
     // only if איציק chooses a customer with the same name.
     const { anonymized: anonMsg } = anonymize(
-      msg.fullMessage,
+      cleanedMessage,
       [lead.name].filter((n): n is string => !!n)
     );
 

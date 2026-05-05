@@ -12,7 +12,7 @@ import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { isNull, eq } from "drizzle-orm";
 import * as schema from "../db/schema";
-import { embedBatch } from "../lib/embeddings";
+import { embedBatch, voiceEmbeddingInput } from "../lib/embeddings";
 
 const BATCH_SIZE = 16;
 
@@ -66,7 +66,7 @@ async function main() {
 
   for (let i = 0; i < veRows.length; i += BATCH_SIZE) {
     const slice = veRows.slice(i, i + BATCH_SIZE);
-    const inputs = slice.map((r) => `[${r.scenario}] ${r.finalText}`);
+    const inputs = slice.map((r) => voiceEmbeddingInput(r.scenario, r.finalText));
     const vecs = await embedBatch(inputs);
     const now = new Date();
     for (let j = 0; j < slice.length; j++) {
