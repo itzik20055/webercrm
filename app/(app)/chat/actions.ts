@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { db, leads, voiceExamples, interactions, type Lead } from "@/db";
-import { embedOne } from "@/lib/embeddings";
+import { embedOne, voiceEmbeddingInput } from "@/lib/embeddings";
 import { anonymize } from "@/lib/anonymize";
 import { leadSearchCondition } from "@/lib/lead-search";
 
@@ -108,7 +108,7 @@ export async function saveChatAsVoiceExample(
 
     let embedding: number[] | null = null;
     try {
-      embedding = await embedOne(anonFinal);
+      embedding = await embedOne(voiceEmbeddingInput(parsed.scenario ?? "general", anonFinal));
     } catch {
       embedding = null;
     }

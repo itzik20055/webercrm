@@ -5,7 +5,7 @@ import { z } from "zod";
 import { desc, eq } from "drizzle-orm";
 import { db, leads, interactions, voiceExamples } from "@/db";
 import { draftReply, type DraftScenario } from "@/lib/ai-client";
-import { embedOne } from "@/lib/embeddings";
+import { embedOne, voiceEmbeddingInput } from "@/lib/embeddings";
 
 const SCENARIOS = [
   "first_reply",
@@ -97,7 +97,7 @@ export async function saveVoiceExample(input: {
 
     let embedding: number[] | null = null;
     try {
-      embedding = await embedOne(`[${parsed.scenario}] ${parsed.finalText}`);
+      embedding = await embedOne(voiceEmbeddingInput(parsed.scenario, parsed.finalText));
     } catch {
       embedding = null;
     }

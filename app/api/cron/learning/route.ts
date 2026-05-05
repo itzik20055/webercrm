@@ -33,13 +33,18 @@ export async function GET(req: Request) {
         if (r.status === "ok") {
           acc.savedTotal += r.saved ?? 0;
           acc.duplicatesTotal += r.duplicates ?? 0;
+          acc.rescoredTotal += r.rescored ?? 0;
         }
         return acc;
       },
-      { ok: 0, skipped: 0, error: 0, savedTotal: 0, duplicatesTotal: 0 } as Record<
-        string,
-        number
-      >
+      {
+        ok: 0,
+        skipped: 0,
+        error: 0,
+        savedTotal: 0,
+        duplicatesTotal: 0,
+        rescoredTotal: 0,
+      } as Record<string, number>
     );
     return NextResponse.json({ ...result, summary });
   } catch (e) {

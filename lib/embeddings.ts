@@ -25,6 +25,17 @@ function prepare(text: string): string {
   return text.replace(/\s+/g, " ").trim().slice(0, 6000);
 }
 
+/**
+ * Canonical input format for voice_examples embeddings. Every callsite that
+ * writes to voice_examples (manual saves from chat, draft confirmations, the
+ * nightly learning cron) must route through this helper so the embedding
+ * distribution is consistent — otherwise cosine retrieval mixes apples and
+ * oranges and similarity scores drift.
+ */
+export function voiceEmbeddingInput(scenario: string, finalText: string): string {
+  return `[${scenario}] ${finalText}`;
+}
+
 export async function embedOne(text: string): Promise<number[]> {
   ensureGatewayKey();
   const { embedding } = await embed({

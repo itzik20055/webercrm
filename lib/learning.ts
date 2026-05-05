@@ -13,7 +13,7 @@ import {
 } from "@/db";
 import { MODELS } from "./ai-client";
 import { anonymize } from "./anonymize";
-import { embedOne } from "./embeddings";
+import { embedOne, voiceEmbeddingInput } from "./embeddings";
 
 /**
  * Nightly learning pipeline — mines איציק's actual messages from completed
@@ -23,16 +23,40 @@ import { embedOne } from "./embeddings";
  *
  * Filters out leads that won't yield useful signal:
  *   - Won within 24h with < 5 interactions (customer was going to buy anyway)
- *   - Lost with a reason that's about the offer, not the messaging (price/fit)
  *   - Conversations that are too short to evaluate
  *
- * Idempotent: each (lead, message) pair is hashed; re-runs skip duplicates.
+ * Price-driven losses are NOT skipped — they're the richest source of
+ * `price_objection` learning — but they get a tighter multiplier (0.5) so the
+ * loss reason (exogenous to messaging) doesn't dominate the signal.
+ *
+ * Re-mining: when a hash already exists but the lead's status has changed
+ * since the example was saved (e.g. won → lost after a no-show), the row is
+ * re-scored using the original baseScore × the new multiplier. This stops
+ * stale outcome multipliers from dragging retrieval in the wrong direction.
+ *
+ * Idempotent on the message text: each (lead, message) pair is hashed.
  */
 
 const LEARNING_LAST_RUN_KEY = "learning_last_run_at";
 const MIN_INTERACTIONS = 2;
 const MIN_TOTAL_CONTENT = 200;
 const PRICE_LOSS_REASON_RE = /מחיר|תקציב|יקר|לא מתאים|לא רלוונטי|לא בתקציב|too expensive|budget|not a fit/i;
+
+/**
+ * Outcome multiplier — applied to the LLM's per-message score before clamping
+ * to [-1, +1]. Booked leads boost; lost leads attenuate. Price/fit losses get
+ * the strongest haircut because the loss reason is about the offer, not the
+ * messaging — but we still want the messages in the dataset (this is where
+ * `price_objection` learning lives).
+ */
+function computeOutcomeMultiplier(lead: Lead): number {
+  if (lead.status === "booked") return 1.3;
+  if (lead.status === "lost") {
+    if (lead.lostReason && PRICE_LOSS_REASON_RE.test(lead.lostReason)) return 0.5;
+    return 0.7;
+  }
+  return 1.0;
+}
 
 export async function getLearningCursor(): Promise<Date | null> {
   const [row] = await db
@@ -169,14 +193,6 @@ function shouldSkipLead(lead: Lead, leadInteractions: Interaction[]): string | n
     }
   }
 
-  if (
-    lead.status === "lost" &&
-    lead.lostReason &&
-    PRICE_LOSS_REASON_RE.test(lead.lostReason)
-  ) {
-    return "lost_on_price_or_fit";
-  }
-
   return null;
 }
 
@@ -186,6 +202,7 @@ export interface MineLeadResult {
   reason?: string;
   saved?: number;
   duplicates?: number;
+  rescored?: number;
 }
 
 export async function mineLeadConversation(
@@ -242,24 +259,54 @@ export async function mineLeadConversation(
     return { leadId: lead.id, status: "skipped", reason: mining.excludeReason ?? "ai_excluded" };
   }
 
-  // Outcome multiplier — booked leads get a boost, lost leads (that weren't
-  // already filtered as price-only losses) get a haircut.
-  const outcomeMultiplier =
-    lead.status === "booked" ? 1.3 : lead.status === "lost" ? 0.7 : 1.0;
+  const outcomeMultiplier = computeOutcomeMultiplier(lead);
 
   let saved = 0;
   let duplicates = 0;
+  let rescored = 0;
   for (const msg of mining.scoredMessages) {
     if (!msg.fullMessage?.trim()) continue;
 
     const hash = hashMessage(lead.id, msg.fullMessage);
-    const existing = await db
-      .select({ id: voiceExamples.id })
+    const [existing] = await db
+      .select({
+        id: voiceExamples.id,
+        score: voiceExamples.score,
+        contextSnapshot: voiceExamples.contextSnapshot,
+      })
       .from(voiceExamples)
       .where(eq(voiceExamples.messageHash, hash))
       .limit(1);
-    if (existing.length > 0) {
-      duplicates += 1;
+    if (existing) {
+      // The mined message already exists. If the lead's outcome changed since
+      // we last saw it, refresh the score from the saved baseScore × the new
+      // multiplier — without paying for another LLM mining pass on this row.
+      const ctx = (existing.contextSnapshot ?? {}) as Record<string, unknown>;
+      const baseScore =
+        typeof ctx.baseScore === "number" ? (ctx.baseScore as number) : null;
+      const prevMultiplier =
+        typeof ctx.outcomeMultiplier === "number"
+          ? (ctx.outcomeMultiplier as number)
+          : null;
+
+      if (baseScore !== null && prevMultiplier !== outcomeMultiplier) {
+        const refreshed = Math.max(-1, Math.min(1, baseScore * outcomeMultiplier));
+        await db
+          .update(voiceExamples)
+          .set({
+            score: refreshed,
+            contextSnapshot: {
+              ...ctx,
+              leadStatusAtSave: lead.status,
+              lostReasonAtSave: lead.lostReason ?? null,
+              outcomeMultiplier,
+            },
+          })
+          .where(eq(voiceExamples.id, existing.id));
+        rescored += 1;
+      } else {
+        duplicates += 1;
+      }
       continue;
     }
 
@@ -275,7 +322,7 @@ export async function mineLeadConversation(
 
     let embedding: number[] | null = null;
     try {
-      embedding = await embedOne(anonMsg);
+      embedding = await embedOne(voiceEmbeddingInput(msg.scenario, anonMsg));
     } catch {
       embedding = null;
     }
@@ -291,6 +338,10 @@ export async function mineLeadConversation(
         contextSnapshot: {
           rationale: msg.rationale,
           fromLearningCron: true,
+          baseScore: msg.score,
+          outcomeMultiplier,
+          leadStatusAtSave: lead.status,
+          lostReasonAtSave: lead.lostReason ?? null,
         },
         embedding,
         embeddedAt: embedding ? new Date() : null,
@@ -312,7 +363,7 @@ export async function mineLeadConversation(
     }
   }
 
-  return { leadId: lead.id, status: "ok", saved, duplicates };
+  return { leadId: lead.id, status: "ok", saved, duplicates, rescored };
 }
 
 async function processCandidates(
