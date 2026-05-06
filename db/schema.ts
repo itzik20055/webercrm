@@ -399,6 +399,13 @@ export const archiveImports = pgTable(
     /** Free-form note from the user when starting (e.g. "winter 2024 calls"). */
     note: text(),
     error: text(),
+    /**
+     * How many times the worker has self-chained for this batch. Each Vercel
+     * function invocation is capped at 300s; large batches self-chain via
+     * /api/archive/phone/resume to continue. Capped at MAX_RESUMES in the
+     * worker to prevent runaway loops if a customer group keeps failing.
+     */
+    resumeCount: integer().notNull().default(0),
     startedAt: timestamp({ withTimezone: true }),
     finishedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

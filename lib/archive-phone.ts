@@ -14,6 +14,7 @@ import {
 import { parseCallSubject } from "./call-recording";
 import { transcribeAudio } from "./ai-client";
 import { extractArchivedConversation } from "./archive-extractor";
+import { safeErrorMessage } from "./sanitize";
 
 /**
  * Phone-archive ingestion. Groups recordings by the customer phone (extracted
@@ -28,8 +29,59 @@ import { extractArchivedConversation } from "./archive-extractor";
  * (importBatchId, phoneHash) plus an onConflictDoNothing insert ensures
  * concurrent or re-triggered runs cannot create duplicate rows for the same
  * customer.
+ *
+ * For batches that don't fit in a single 300s function: when the worker
+ * detects it's about to hit TIME_BUDGET_MS with groups still queued, it
+ * fires an HTTP request to /api/archive/phone/resume which spawns a fresh
+ * function invocation that picks up where this one stopped. The resume
+ * count is capped at MAX_RESUMES so a stuck group can't loop forever.
  */
 const TIME_BUDGET_MS = 270_000;
+const MAX_RESUMES = 50;
+
+/**
+ * Fires an HTTP request to /api/archive/phone/resume to spin up a fresh
+ * Vercel function for the same batch. Auth is via CRON_SECRET. Fire-and-
+ * forget — we don't block on the response body, only on the connection
+ * being established (so a network failure surfaces as a logged error).
+ */
+async function selfResume(batchId: string): Promise<void> {
+  const baseUrl = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : process.env.APP_URL ?? "http://localhost:3000";
+  if (!process.env.CRON_SECRET) {
+    console.error(
+      "[archive-phone] cannot self-resume — CRON_SECRET not set",
+      batchId
+    );
+    return;
+  }
+  try {
+    const res = await fetch(`${baseUrl}/api/archive/phone/resume`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${process.env.CRON_SECRET}`,
+      },
+      body: JSON.stringify({ batchId }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(
+        "[archive-phone] self-resume returned non-OK",
+        batchId,
+        res.status,
+        text.slice(0, 200)
+      );
+    }
+  } catch (e) {
+    console.error(
+      "[archive-phone] self-resume fetch failed",
+      batchId,
+      safeErrorMessage(e)
+    );
+  }
+}
 
 export interface PhonePreviewResult {
   total: number;
@@ -158,7 +210,11 @@ async function processCustomerGroup(
       });
       transcripts.push(t.transcript);
     } catch (e) {
-      console.error("[archive-phone] transcribe failed", m.uid, e);
+      console.error(
+        "[archive-phone] transcribe failed",
+        m.uid,
+        safeErrorMessage(e)
+      );
       transcripts.push("(תמלול נכשל)");
     }
   }
@@ -177,7 +233,7 @@ async function processCustomerGroup(
   } catch (e) {
     return {
       ok: false,
-      error: e instanceof Error ? e.message : String(e),
+      error: safeErrorMessage(e),
     };
   }
 
@@ -353,9 +409,24 @@ export async function runArchivePhoneBatch(
         .where(eq(archiveImports.id, batchId));
     }
 
-    const finalStatus: "processing" | "done" = hitTimeBudget
-      ? "processing"
-      : "done";
+    const stillHaveTodo = todoGroups.length > processedCount - batch.processedCount;
+    const reachedResumeCap = (batch.resumeCount ?? 0) >= MAX_RESUMES;
+
+    let finalStatus: "processing" | "done" | "failed";
+    let resumeError: string | null = null;
+    if (!hitTimeBudget && !stillHaveTodo) {
+      finalStatus = "done";
+    } else if (hitTimeBudget && !reachedResumeCap) {
+      finalStatus = "processing";
+    } else if (reachedResumeCap) {
+      finalStatus = "failed";
+      resumeError = `Reached max self-resume count (${MAX_RESUMES}). Some groups likely failing repeatedly — check logs.`;
+    } else {
+      // hitTimeBudget=false but stillHaveTodo=true (e.g. processCustomerGroup
+      // returned without progress for some reason). Treat as processing —
+      // a manual resume will retry.
+      finalStatus = "processing";
+    }
 
     await db
       .update(archiveImports)
@@ -364,22 +435,35 @@ export async function runArchivePhoneBatch(
         successCount,
         failureCount,
         status: finalStatus,
-        finishedAt: finalStatus === "done" ? new Date() : null,
+        error: resumeError,
+        finishedAt: finalStatus === "done" || finalStatus === "failed" ? new Date() : null,
       })
       .where(eq(archiveImports.id, batchId));
+
+    if (finalStatus === "processing" && hitTimeBudget) {
+      // Self-chain: bump resumeCount and ask /resume to spin up another
+      // function to continue. This call is fire-and-forget — we don't await
+      // its body, only the connection. If the request fails, the batch sits
+      // in `processing` until somebody manually retries.
+      await db
+        .update(archiveImports)
+        .set({ resumeCount: (batch.resumeCount ?? 0) + 1 })
+        .where(eq(archiveImports.id, batchId));
+      await selfResume(batchId);
+    }
 
     return {
       ok: true,
       batchId,
-      status: finalStatus,
+      status: finalStatus === "failed" ? "failed" : finalStatus,
       processedCount,
       successCount,
       failureCount,
       hitTimeBudget,
     };
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    console.error("[archive-phone] batch crashed", batchId, e);
+    const message = safeErrorMessage(e);
+    console.error("[archive-phone] batch crashed", batchId, message);
     await db
       .update(archiveImports)
       .set({

@@ -2,6 +2,7 @@ import { NextResponse, after } from "next/server";
 import { db, archiveImports } from "@/db";
 import { isAuthenticated } from "@/lib/session";
 import { runArchivePhoneBatch } from "@/lib/archive-phone";
+import { safeErrorMessage } from "@/lib/sanitize";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -53,7 +54,10 @@ export async function POST(req: Request) {
       try {
         await runArchivePhoneBatch(created.id);
       } catch (e) {
-        console.error("[archive/phone/start] background batch crashed", e);
+        console.error(
+          "[archive/phone/start] background batch crashed",
+          safeErrorMessage(e)
+        );
       }
     });
 
@@ -62,8 +66,8 @@ export async function POST(req: Request) {
       { status: 202 }
     );
   } catch (e) {
-    const message = e instanceof Error ? e.message : "שגיאה לא ידועה";
-    console.error("[archive/phone/start] failed", e);
+    const message = safeErrorMessage(e);
+    console.error("[archive/phone/start] failed", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
