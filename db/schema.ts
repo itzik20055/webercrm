@@ -276,6 +276,136 @@ export const voiceExamples = pgTable(
   ]
 );
 
+export const archiveSourceEnum = pgEnum("archive_source", [
+  "whatsapp_archive",
+  "phone_archive",
+]);
+
+export const archiveOutcomeEnum = pgEnum("archive_outcome", [
+  "booked",
+  "lost",
+  "unknown",
+]);
+
+/**
+ * Long-form learning corpus distinct from the live `leads` pipeline. Holds
+ * historical conversations (last year's WhatsApp exports, FreeTelecom call
+ * archives) that are used for retrieval at draft time but never appear in
+ * queues, inbox, or any lead-facing UI. Prices and absolute activity dates
+ * are scrubbed before save; persona, interests, objections, and what worked
+ * are extracted into `archetype` (jsonb) by the import pipeline.
+ *
+ * Embedding is computed over `winningAngle + persona + interestDrivers` so
+ * cosine retrieval at draft time can answer "lids similar to *this* lead —
+ * what worked with them?".
+ */
+export const conversationArchive = pgTable(
+  "conversation_archive",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    source: archiveSourceEnum().notNull(),
+    /**
+     * Hash of the customer phone (sha256). Lets us group multiple phone
+     * recordings for the same person into one logical conversation without
+     * storing the raw phone number.
+     */
+    phoneHash: text(),
+    /** Anonymized + price-scrubbed transcript fed to the extractor. Kept for audit/debug. */
+    transcript: text().notNull(),
+    audience: audienceEnum().notNull(),
+    language: languageEnum().notNull(),
+    /**
+     * Hybrid extraction shape. Structured fields the chat retrieves explicitly:
+     *   {
+     *     persona: { community, religiosity, decision_makers[], family_size_range, ... },
+     *     interest_drivers: string[],
+     *     objections: string[],
+     *     winning_angle: string,
+     *     follow_up_cadence: { days_after_silence, channel, trigger },
+     *     free_form_insights: string  // anything else the LLM saw
+     *   }
+     */
+    archetype: jsonb().notNull(),
+    outcome: archiveOutcomeEnum().notNull().default("unknown"),
+    /** 0..1 — when low (< 0.6) we exclude the row from aggregation queries. */
+    outcomeConfidence: real().notNull().default(1),
+    embedding: vector({ dimensions: 1536 }),
+    embeddedAt: timestamp({ withTimezone: true }),
+    /** When the original conversation started/ended — useful for season slicing. */
+    conversationStartedAt: timestamp({ withTimezone: true }),
+    conversationEndedAt: timestamp({ withTimezone: true }),
+    interactionCount: integer(),
+    /**
+     * Groups all rows from one user-triggered import run together. Lets the
+     * UI show "your last batch" stats and lets us roll back a bad batch
+     * without searching by timestamp.
+     */
+    importBatchId: uuid(),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("conversation_archive_audience_idx").on(t.audience, t.language),
+    index("conversation_archive_outcome_idx").on(t.outcome),
+    index("conversation_archive_phone_hash_idx").on(t.phoneHash),
+    index("conversation_archive_batch_idx").on(t.importBatchId),
+    index("conversation_archive_embedding_idx")
+      .using("hnsw", t.embedding.op("vector_cosine_ops")),
+  ]
+);
+
+export const archiveImportStatusEnum = pgEnum("archive_import_status", [
+  "pending",
+  "counting",
+  "ready",
+  "processing",
+  "done",
+  "failed",
+  "cancelled",
+]);
+
+export const archiveImportKindEnum = pgEnum("archive_import_kind", [
+  "whatsapp",
+  "phone",
+]);
+
+/**
+ * Tracks user-triggered archive ingestion runs. The pattern:
+ *   1. user picks a source + (for phone) a date range → row created as `pending`
+ *   2. backend counts available items → status becomes `ready` with `itemCount`
+ *   3. user confirms → status `processing`, worker fans out per item
+ *   4. terminal: `done` / `failed` / `cancelled`
+ * Lets us show progress in the UI and pause/resume long phone batches without
+ * losing track of what's been processed.
+ */
+export const archiveImports = pgTable(
+  "archive_imports",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    kind: archiveImportKindEnum().notNull(),
+    status: archiveImportStatusEnum().notNull().default("pending"),
+    /** For phone imports: inclusive start of the email-date window. */
+    dateFrom: timestamp({ withTimezone: true }),
+    /** For phone imports: inclusive end. */
+    dateTo: timestamp({ withTimezone: true }),
+    /** Filled after the count step. Null until known. */
+    itemCount: integer(),
+    /** How many of itemCount have been processed so far. */
+    processedCount: integer().notNull().default(0),
+    successCount: integer().notNull().default(0),
+    failureCount: integer().notNull().default(0),
+    /** Free-form note from the user when starting (e.g. "winter 2024 calls"). */
+    note: text(),
+    error: text(),
+    startedAt: timestamp({ withTimezone: true }),
+    finishedAt: timestamp({ withTimezone: true }),
+    createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("archive_imports_status_idx").on(t.status),
+    index("archive_imports_created_idx").on(t.createdAt),
+  ]
+);
+
 export const responseTemplates = pgTable("response_templates", {
   id: uuid().primaryKey().defaultRandom(),
   language: languageEnum().notNull().default("he"),
@@ -532,6 +662,10 @@ export type PendingWhatsAppImport = typeof pendingWhatsAppImports.$inferSelect;
 export type NewPendingWhatsAppImport = typeof pendingWhatsAppImports.$inferInsert;
 export type PendingEmail = typeof pendingEmails.$inferSelect;
 export type NewPendingEmail = typeof pendingEmails.$inferInsert;
+export type ConversationArchive = typeof conversationArchive.$inferSelect;
+export type NewConversationArchive = typeof conversationArchive.$inferInsert;
+export type ArchiveImport = typeof archiveImports.$inferSelect;
+export type NewArchiveImport = typeof archiveImports.$inferInsert;
 
 export const LANGUAGE_LABELS: Record<Lead["language"], string> = {
   he: "עברית",

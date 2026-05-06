@@ -85,6 +85,13 @@
       "when": 1776942225880,
       "tag": "0011_outgoing_bug",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1778024980308,
+      "tag": "0012_easy_puck",
+      "breakpoints": true
     }
   ]
 }
