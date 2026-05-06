@@ -1,0 +1,1 @@
+ALTER TABLE "conversation_archive" DROP COLUMN "transcript";

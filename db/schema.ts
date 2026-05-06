@@ -310,8 +310,6 @@ export const conversationArchive = pgTable(
      * storing the raw phone number.
      */
     phoneHash: text(),
-    /** Anonymized + price-scrubbed transcript fed to the extractor. Kept for audit/debug. */
-    transcript: text().notNull(),
     audience: audienceEnum().notNull(),
     language: languageEnum().notNull(),
     /**

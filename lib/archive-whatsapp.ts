@@ -109,7 +109,6 @@ export async function ingestWhatsAppArchive(
   const insertValues: NewConversationArchive = {
     source: "whatsapp_archive",
     phoneHash,
-    transcript: extracted.scrubbedTranscript,
     audience: args.audience,
     language: args.language,
     archetype: extracted.archetype as object,

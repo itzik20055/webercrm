@@ -548,14 +548,21 @@ Return ONLY the transcript text. No preamble, no explanation, no speaker labels.
     throw e;
   } finally {
     const durationMs = Date.now() - start;
-    // Audit log: store mediaType + length, not audio bytes themselves.
+    // Audit log: store mediaType + length and a short non-identifying preview
+    // of the transcript. The full transcript ends up in
+    // pending_call_recordings (live calls) or is discarded (archive flow), so
+    // we don't lose recoverability — but ai_audit_log is the broadest table
+    // and shouldn't carry full conversations.
+    const preview = transcript
+      ? transcript.slice(0, 120) + (transcript.length > 120 ? "…" : "")
+      : null;
     await db
       .insert(aiAuditLog)
       .values({
         operation: "transcribe",
         model: MODELS.transcribe,
         inputAnonymized: `[audio ${mediaType} ${audio.byteLength} bytes]`,
-        output: transcript || null,
+        output: preview,
         leadId: opts.leadId ?? null,
         durationMs,
         error: error ?? null,
@@ -769,7 +776,8 @@ export async function extractLeadFromChat(
         model: MODELS.extract,
         inputAnonymized: anonymized,
         output: result ? JSON.stringify(result) : null,
-        placeholderMap,
+        // placeholderMap intentionally not persisted — it is the
+        // deanonymization key, useful only during the request lifecycle.
         leadId: input.knownLeadId ?? null,
         durationMs,
         error: error ?? null,
@@ -1024,7 +1032,7 @@ ${anonymized}
         model: MODELS.extract,
         inputAnonymized: `${currentProfile}\n${followupLine}\n---\n${anonymized}`,
         output: result ? JSON.stringify(result) : null,
-        placeholderMap,
+        // placeholderMap intentionally not persisted — see extract_lead_from_chat.
         leadId: input.lead.id,
         durationMs,
         error: error ?? null,
@@ -1409,7 +1417,8 @@ export async function logDraftReply(args: {
       model: args.model,
       inputAnonymized: args.inputAnonymized,
       output: args.outputAnonymized || null,
-      placeholderMap: args.placeholderMap,
+      // placeholderMap intentionally not persisted — it is the
+      // deanonymization key, useful only during the request lifecycle.
       leadId: args.leadId,
       durationMs: args.durationMs,
       error: args.error ?? null,

@@ -272,7 +272,6 @@ async function processCustomerGroup(
   const insertValues: NewConversationArchive = {
     source: "phone_archive",
     phoneHash: group.phoneHash,
-    transcript: extracted.scrubbedTranscript,
     audience,
     language,
     archetype: extracted.archetype as object,
