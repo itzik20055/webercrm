@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { db, conversationArchive, type Lead, type NewConversationArchive } from "@/db";
 import { extractArchivedConversation } from "./archive-extractor";
 import { importWhatsAppExport } from "./whatsapp-import";
+import { renderChatForArchive } from "./whatsapp-parser";
 import { getSetting } from "./settings";
 
 /**
@@ -71,10 +72,19 @@ export async function ingestWhatsAppArchive(
 
   const knownNames = parsed.inferredLeadName ? [parsed.inferredLeadName] : [];
 
+  // Re-render the chat with relative day numbers and explicit silence
+  // annotations so the LLM sees cadence signal even after the scrubber
+  // strips time-of-day. parsed.renderedChat (used by the leads pipeline) has
+  // absolute ISO timestamps, which would just get scrubbed away here.
+  const transcriptForExtraction = renderChatForArchive(parsed.chat, {
+    myName,
+    transcripts: parsed.transcripts,
+  });
+
   let extracted;
   try {
     extracted = await extractArchivedConversation({
-      rawTranscript: parsed.renderedChat,
+      rawTranscript: transcriptForExtraction,
       audience: args.audience,
       language: args.language,
       knownNames,

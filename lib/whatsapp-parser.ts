@@ -216,6 +216,76 @@ export function renderChatForAI(chat: ParsedChat, opts: RenderOptions): string {
   return lines.join("\n");
 }
 
+/**
+ * Renders a parsed chat for the archive learning pipeline. Differs from
+ * `renderChatForAI` in two ways:
+ *
+ *   1. Absolute timestamps are replaced with relative day numbers
+ *      (`[יום 1, 09:42]`) so the LLM sees how much time passed between
+ *      messages without learning specific calendar dates that expire
+ *      year-over-year.
+ *
+ *   2. Silence gaps longer than 12 hours get an explicit annotation
+ *      (`-- אחרי N ימי שתיקה --`) on their own line so the cadence signal
+ *      survives even if the time-of-day gets scrubbed downstream by the
+ *      archive scrubber.
+ *
+ * The HH:MM time-of-day is preserved here; if the scrubber chooses to remove
+ * it, the relative day number still carries the cadence information.
+ */
+export function renderChatForArchive(chat: ParsedChat, opts: RenderOptions): string {
+  const lines: string[] = [];
+  if (chat.messages.length === 0) return "";
+
+  const startMs = chat.messages[0].timestamp.getTime();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const silenceThresholdMs = 12 * 60 * 60 * 1000;
+
+  let prevTs: Date | null = null;
+
+  for (const m of chat.messages) {
+    if (prevTs) {
+      const gapMs = m.timestamp.getTime() - prevTs.getTime();
+      if (gapMs >= silenceThresholdMs) {
+        const gapDays = Math.round(gapMs / oneDayMs);
+        const label =
+          gapDays === 0
+            ? "אחרי שתיקה של חצי יום"
+            : gapDays === 1
+              ? "אחרי יום שתיקה"
+              : `אחרי ${gapDays} ימי שתיקה`;
+        lines.push(`-- ${label} --`);
+      }
+    }
+
+    const dayN = Math.floor((m.timestamp.getTime() - startMs) / oneDayMs) + 1;
+    const role = m.sender === opts.myName ? "Me" : m.sender;
+    const hh = String(m.timestamp.getUTCHours()).padStart(2, "0");
+    const mm = String(m.timestamp.getUTCMinutes()).padStart(2, "0");
+
+    let body = m.text;
+    if (m.attachment) {
+      if (m.attachment.kind === "audio") {
+        const transcript = opts.transcripts?.[m.attachment.filename];
+        body = transcript
+          ? `[🎤 Voice: "${transcript}"]`
+          : `[🎤 Voice message — not transcribed]`;
+      } else if (m.attachment.kind === "image") {
+        body = `[📷 Image attached]`;
+      } else if (m.attachment.kind === "video") {
+        body = `[🎥 Video attached]`;
+      } else {
+        body = `[📎 ${m.attachment.filename}]`;
+      }
+    } else if (m.mediaOmitted) {
+      body = `[${m.mediaOmitted} omitted from export]`;
+    }
+    lines.push(`[יום ${dayN}, ${hh}:${mm}] ${role}: ${body}`);
+    prevTs = m.timestamp;
+  }
+  return lines.join("\n");
+}
+
 /** Returns the lead's name = the participant that is NOT the user. */
 export function inferLeadName(chat: ParsedChat, myName: string): string | null {
   const others = chat.participants.filter((p) => p !== myName);
