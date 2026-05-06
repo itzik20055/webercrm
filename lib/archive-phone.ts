@@ -36,7 +36,31 @@ import { safeErrorMessage } from "./sanitize";
  * function invocation that picks up where this one stopped. The resume
  * count is capped at MAX_RESUMES so a stuck group can't loop forever.
  */
-const TIME_BUDGET_MS = 270_000;
+/**
+ * Vercel kills the function at 300s. The watchdog fires at WATCHDOG_MS to
+ * trigger self-resume *before* the kill, even if the worker is mid-await
+ * inside processCustomerGroup (which can run 3+ minutes for customers with
+ * many recordings).
+ */
+const WATCHDOG_MS = 270_000;
+
+/**
+ * Used by the in-loop pre-group check. Conservative — if we haven't started
+ * a new group by here, we'd rather defer to the next invocation. The smart
+ * cost estimate below is what actually decides whether to enter a group.
+ */
+const SOFT_BUDGET_MS = 230_000;
+
+/**
+ * Per-recording cost guess. Each FreeTelecom recording is one Gemini Pro
+ * audio call which empirically averages 30s, occasionally up to 90s. Plus
+ * one NER + one extract call (~5s each) per group. Used by
+ * `estimateGroupMs` to decide whether a group will fit in the remaining
+ * budget — a 5-recording customer needs ~3 minutes of headroom.
+ */
+const PER_RECORDING_MS = 35_000;
+const PER_GROUP_OVERHEAD_MS = 15_000;
+
 const MAX_RESUMES = 50;
 
 /**
@@ -107,6 +131,10 @@ export interface RunPhoneBatchResult {
 
 function hashPhone(phone: string): string {
   return createHash("sha256").update(phone).digest("hex");
+}
+
+function estimateGroupMs(group: CustomerGroup): number {
+  return PER_RECORDING_MS * group.mails.length + PER_GROUP_OVERHEAD_MS;
 }
 
 /**
@@ -339,6 +367,34 @@ export async function runArchivePhoneBatch(
   let processedCount = batch.processedCount;
   let hitTimeBudget = false;
 
+  // Watchdog: regardless of where the worker is in its async chain, fire
+  // self-resume 30s before Vercel kills the function. Without this, a worker
+  // stuck inside a long Gemini transcription would die without ever reaching
+  // the end-of-loop self-chain code.
+  let watchdogFired = false;
+  const watchdog = setTimeout(async () => {
+    watchdogFired = true;
+    console.warn(
+      `[archive-phone] watchdog firing for batch ${batchId} — about to time out`
+    );
+    if ((batch.resumeCount ?? 0) >= MAX_RESUMES) {
+      await db
+        .update(archiveImports)
+        .set({
+          status: "failed",
+          error: `Reached max self-resume count (${MAX_RESUMES}).`,
+          finishedAt: new Date(),
+        })
+        .where(eq(archiveImports.id, batchId));
+      return;
+    }
+    await db
+      .update(archiveImports)
+      .set({ resumeCount: (batch.resumeCount ?? 0) + 1 })
+      .where(eq(archiveImports.id, batchId));
+    await selfResume(batchId);
+  }, WATCHDOG_MS);
+
   try {
     // Fetch every recording in the range up front, in a single IMAP session.
     // Limit is generous so we drain the window in one go — far better than
@@ -387,7 +443,20 @@ export async function runArchivePhoneBatch(
       .where(eq(archiveImports.id, batchId));
 
     for (const group of todoGroups) {
-      if (Date.now() - started > TIME_BUDGET_MS) {
+      const elapsed = Date.now() - started;
+      const estimated = estimateGroupMs(group);
+      // Soft budget: stop entering new groups when we'd run past 230s. The
+      // watchdog will still fire at 270s as a safety net if we mis-estimated.
+      if (elapsed + estimated > SOFT_BUDGET_MS) {
+        hitTimeBudget = true;
+        console.log(
+          `[archive-phone] deferring group (${group.mails.length} recordings, est ${estimated}ms) — already used ${elapsed}ms`
+        );
+        break;
+      }
+      // Belt-and-braces: if the watchdog already fired (mid-loop in some
+      // earlier group), don't start another.
+      if (watchdogFired) {
         hitTimeBudget = true;
         break;
       }
@@ -412,6 +481,19 @@ export async function runArchivePhoneBatch(
     const stillHaveTodo = todoGroups.length > processedCount - batch.processedCount;
     const reachedResumeCap = (batch.resumeCount ?? 0) >= MAX_RESUMES;
 
+    // If the watchdog already handled the resume, don't double-update.
+    if (watchdogFired) {
+      return {
+        ok: true,
+        batchId,
+        status: "processing",
+        processedCount,
+        successCount,
+        failureCount,
+        hitTimeBudget: true,
+      };
+    }
+
     let finalStatus: "processing" | "done" | "failed";
     let resumeError: string | null = null;
     if (!hitTimeBudget && !stillHaveTodo) {
@@ -422,9 +504,6 @@ export async function runArchivePhoneBatch(
       finalStatus = "failed";
       resumeError = `Reached max self-resume count (${MAX_RESUMES}). Some groups likely failing repeatedly — check logs.`;
     } else {
-      // hitTimeBudget=false but stillHaveTodo=true (e.g. processCustomerGroup
-      // returned without progress for some reason). Treat as processing —
-      // a manual resume will retry.
       finalStatus = "processing";
     }
 
@@ -441,10 +520,6 @@ export async function runArchivePhoneBatch(
       .where(eq(archiveImports.id, batchId));
 
     if (finalStatus === "processing" && hitTimeBudget) {
-      // Self-chain: bump resumeCount and ask /resume to spin up another
-      // function to continue. This call is fire-and-forget — we don't await
-      // its body, only the connection. If the request fails, the batch sits
-      // in `processing` until somebody manually retries.
       await db
         .update(archiveImports)
         .set({ resumeCount: (batch.resumeCount ?? 0) + 1 })
@@ -485,5 +560,7 @@ export async function runArchivePhoneBatch(
       hitTimeBudget,
       error: message,
     };
+  } finally {
+    clearTimeout(watchdog);
   }
 }
