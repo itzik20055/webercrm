@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/retention-sweep",
       "schedule": "30 4 * * *"
+    },
+    {
+      "path": "/api/cron/archive-resume",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

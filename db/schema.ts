@@ -404,6 +404,15 @@ export const archiveImports = pgTable(
      * worker to prevent runaway loops if a customer group keeps failing.
      */
     resumeCount: integer().notNull().default(0),
+    /**
+     * Liveness signal — the worker writes NOW() at startup and after every
+     * customer. The archive-resume cron picks up batches whose status is
+     * still `processing` but whose heartbeat is older than ~90s, meaning the
+     * Vercel function died without self-resuming successfully. Doubles as
+     * an atomic lock: workers acquire by `UPDATE … WHERE heartbeat IS NULL
+     * OR heartbeat < NOW() - INTERVAL '90 seconds' RETURNING id`.
+     */
+    lastHeartbeatAt: timestamp({ withTimezone: true }),
     startedAt: timestamp({ withTimezone: true }),
     finishedAt: timestamp({ withTimezone: true }),
     createdAt: timestamp({ withTimezone: true }).notNull().defaultNow(),

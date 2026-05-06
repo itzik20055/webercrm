@@ -64,6 +64,15 @@ const PER_GROUP_OVERHEAD_MS = 15_000;
 const MAX_RESUMES = 50;
 
 /**
+ * If a batch's last_heartbeat_at is older than this, the worker is presumed
+ * dead and another invocation may take over. The atomic-lock UPDATE uses
+ * this same threshold. Tuned to be longer than typical per-customer time
+ * (3 minutes) plus some slack — but short enough that the cron picks up
+ * stuck batches within minutes of death.
+ */
+const HEARTBEAT_STALE_MS = 90_000;
+
+/**
  * Fires an HTTP request to /api/archive/phone/resume to spin up a fresh
  * Vercel function for the same batch. Auth is via CRON_SECRET. Fire-and-
  * forget — we don't block on the response body, only on the connection
@@ -356,10 +365,50 @@ export async function runArchivePhoneBatch(
 
   const language: Lead["language"] = "he";
 
-  await db
+  // Atomic lock acquire. The UPDATE only succeeds if no other worker is
+  // currently alive for this batch (heartbeat is null OR stale). RETURNING
+  // tells us whether we won — if we didn't, bail without touching anything.
+  const lockResult = await db
     .update(archiveImports)
-    .set({ status: "processing", startedAt: batch.startedAt ?? new Date() })
-    .where(eq(archiveImports.id, batchId));
+    .set({
+      status: "processing",
+      startedAt: batch.startedAt ?? new Date(),
+      lastHeartbeatAt: new Date(),
+    })
+    .where(
+      sql`${archiveImports.id} = ${batchId} AND (${archiveImports.lastHeartbeatAt} IS NULL OR ${archiveImports.lastHeartbeatAt} < NOW() - INTERVAL '${sql.raw(String(HEARTBEAT_STALE_MS))} milliseconds')`
+    )
+    .returning({ id: archiveImports.id });
+  if (lockResult.length === 0) {
+    console.log(
+      `[archive-phone] batch ${batchId} already has a live worker — bailing`
+    );
+    return {
+      ok: true,
+      batchId,
+      status: "processing",
+      processedCount: batch.processedCount,
+      successCount: batch.successCount,
+      failureCount: batch.failureCount,
+      hitTimeBudget: false,
+    };
+  }
+
+  // Heartbeat ticker — keeps the lock alive while we work. Refreshes every
+  // 30s so a worker that's mid-transcription (>60s on Gemini) never appears
+  // dead to the cron sweeper.
+  const heartbeat = setInterval(() => {
+    db.update(archiveImports)
+      .set({ lastHeartbeatAt: new Date() })
+      .where(eq(archiveImports.id, batchId))
+      .catch((e) => {
+        console.error(
+          "[archive-phone] heartbeat update failed",
+          batchId,
+          safeErrorMessage(e)
+        );
+      });
+  }, 30_000);
 
   let successCount = batch.successCount;
   let failureCount = batch.failureCount;
@@ -561,5 +610,6 @@ export async function runArchivePhoneBatch(
     };
   } finally {
     clearTimeout(watchdog);
+    clearInterval(heartbeat);
   }
 }
