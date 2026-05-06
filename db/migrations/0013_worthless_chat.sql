@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "conversation_archive_batch_phone_uq" ON "conversation_archive" USING btree ("import_batch_id","phone_hash") WHERE "conversation_archive"."import_batch_id" is not null and "conversation_archive"."phone_hash" is not null;

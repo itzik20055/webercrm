@@ -350,6 +350,9 @@ export const conversationArchive = pgTable(
     index("conversation_archive_batch_idx").on(t.importBatchId),
     index("conversation_archive_embedding_idx")
       .using("hnsw", t.embedding.op("vector_cosine_ops")),
+    uniqueIndex("conversation_archive_batch_phone_uq")
+      .on(t.importBatchId, t.phoneHash)
+      .where(sql`${t.importBatchId} is not null and ${t.phoneHash} is not null`),
   ]
 );
 

@@ -190,6 +190,10 @@ export async function extractArchivedConversation(
   const { object } = await generateObject({
     model: MODELS.learning,
     schema: ExtractionResultSchema,
+    // Same trajectory must produce the same archetype/outcome — we observed
+    // the model alternating between `booked` and `unknown` for identical
+    // input when this was left at the default sampling temperature.
+    temperature: 0,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
       { role: "user", content: userMessage },

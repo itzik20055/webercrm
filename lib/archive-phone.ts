@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import {
   db,
   archiveImports,
@@ -8,7 +8,6 @@ import {
   type NewConversationArchive,
 } from "@/db";
 import {
-  countCallRecordingsInRange,
   fetchCallRecordingsInRange,
   type CallRecordingMail,
 } from "./gmail-imap";
@@ -24,10 +23,11 @@ import { extractArchivedConversation } from "./archive-extractor";
  * the trajectory (last call's tone) rather than user-supplied — we have no
  * pre-existing label for archived call recordings.
  *
- * Bounded by the 270s function ceiling. If the batch can't finish in one
- * invocation, partial rows land in conversation_archive and the next call
- * (`runArchivePhoneBatch` again with the same batchId) skips groups already
- * persisted via the (importBatchId, phoneHash) natural dedup.
+ * The worker is intended to be called once per batch via after() in the
+ * /start endpoint. It is idempotent: a unique index on
+ * (importBatchId, phoneHash) plus an onConflictDoNothing insert ensures
+ * concurrent or re-triggered runs cannot create duplicate rows for the same
+ * customer.
  */
 const TIME_BUDGET_MS = 270_000;
 
@@ -36,12 +36,10 @@ export interface PhonePreviewResult {
   mailbox: string;
 }
 
-export async function previewPhoneArchive(args: {
-  dateFrom: Date;
-  dateTo: Date;
-}): Promise<PhonePreviewResult> {
-  const r = await countCallRecordingsInRange(args.dateFrom, args.dateTo);
-  return { total: r.total, mailbox: r.mailbox };
+interface CustomerGroup {
+  phoneHash: string;
+  customerPhone: string;
+  mails: CallRecordingMail[];
 }
 
 export interface RunPhoneBatchResult {
@@ -53,12 +51,6 @@ export interface RunPhoneBatchResult {
   failureCount: number;
   hitTimeBudget: boolean;
   error?: string;
-}
-
-interface CustomerGroup {
-  phoneHash: string;
-  customerPhone: string;
-  mails: CallRecordingMail[];
 }
 
 function hashPhone(phone: string): string {
@@ -138,14 +130,20 @@ function renderTrajectory(mails: CallRecordingMail[], transcripts: string[]): st
   return sections.join("\n\n");
 }
 
+export async function previewPhoneArchive(args: {
+  dateFrom: Date;
+  dateTo: Date;
+}): Promise<PhonePreviewResult> {
+  const { countCallRecordingsInRange } = await import("./gmail-imap");
+  const r = await countCallRecordingsInRange(args.dateFrom, args.dateTo);
+  return { total: r.total, mailbox: r.mailbox };
+}
+
 async function processCustomerGroup(
   group: CustomerGroup,
   batchId: string,
   language: Lead["language"]
-): Promise<{ ok: boolean; archiveId?: string; error?: string }> {
-  // Transcribe every recording. Done sequentially — Gemini Pro audio is the
-  // expensive call (5-30s each) and parallelizing would race against the
-  // function timeout for batches with many recordings per phone.
+): Promise<{ ok: boolean; archiveId?: string; skipped?: boolean; error?: string }> {
   const transcripts: string[] = [];
   for (const m of group.mails) {
     const audio = m.attachments[0];
@@ -175,7 +173,6 @@ async function processCustomerGroup(
       audience,
       language,
       knownNames: [],
-      // No knownOutcome — let the extractor infer from the trajectory.
     });
   } catch (e) {
     return {
@@ -205,12 +202,22 @@ async function processCustomerGroup(
     importBatchId: batchId,
   };
 
-  const [created] = await db
+  // The unique index `conversation_archive_batch_phone_uq` on
+  // (importBatchId, phoneHash) is the safety net against any race that slips
+  // past the donePhoneHashes filter. Returning [] means the row already
+  // existed — treat as a benign no-op.
+  const inserted = await db
     .insert(conversationArchive)
     .values(insertValues)
+    .onConflictDoNothing({
+      target: [conversationArchive.importBatchId, conversationArchive.phoneHash],
+    })
     .returning({ id: conversationArchive.id });
 
-  return { ok: true, archiveId: created.id };
+  if (inserted.length === 0) {
+    return { ok: true, skipped: true };
+  }
+  return { ok: true, archiveId: inserted[0].id };
 }
 
 export async function runArchivePhoneBatch(
@@ -246,63 +253,78 @@ export async function runArchivePhoneBatch(
       error: "batch missing date range",
     };
   }
+  if (batch.status === "done") {
+    return {
+      ok: true,
+      batchId,
+      status: "done",
+      processedCount: batch.processedCount,
+      successCount: batch.successCount,
+      failureCount: batch.failureCount,
+      hitTimeBudget: false,
+    };
+  }
 
   const language: Lead["language"] = "he";
 
-  if (batch.status !== "processing") {
-    await db
-      .update(archiveImports)
-      .set({ status: "processing", startedAt: batch.startedAt ?? new Date() })
-      .where(eq(archiveImports.id, batchId));
-  }
-
-  // Phone hashes already saved for this batch — natural dedup across resumed
-  // invocations. Allows the worker to be safely re-run after timeout.
-  const alreadyDone = await db
-    .select({ phoneHash: conversationArchive.phoneHash })
-    .from(conversationArchive)
-    .where(eq(conversationArchive.importBatchId, batchId));
-  const donePhoneHashes = new Set(
-    alreadyDone.map((r) => r.phoneHash).filter((h): h is string => !!h)
-  );
+  await db
+    .update(archiveImports)
+    .set({ status: "processing", startedAt: batch.startedAt ?? new Date() })
+    .where(eq(archiveImports.id, batchId));
 
   let successCount = batch.successCount;
   let failureCount = batch.failureCount;
   let processedCount = batch.processedCount;
   let hitTimeBudget = false;
 
-  // Pull mails in waves. After each wave we group by phone, process any group
-  // whose phoneHash isn't already saved, then fetch the next wave. We track
-  // exhausted UIDs to avoid re-fetching the same envelopes.
-  const consumedUids: number[] = [];
-
-  while (Date.now() - started < TIME_BUDGET_MS) {
-    const wave = await fetchCallRecordingsInRange({
+  try {
+    // Fetch every recording in the range up front, in a single IMAP session.
+    // Limit is generous so we drain the window in one go — far better than
+    // wave-based fetching, which used to fragment a customer's call history
+    // when it spanned wave boundaries.
+    const allMails = await fetchCallRecordingsInRange({
       from: batch.dateFrom,
       to: batch.dateTo,
-      excludeUids: consumedUids,
-      limit: 10,
+      limit: 10_000,
     });
-    if (wave.length === 0) break;
 
-    // Bucket the wave by phone hash. Each group contains all messages from
-    // this wave belonging to the same customer.
-    const groups = new Map<string, CustomerGroup>();
-    for (const m of wave) {
-      consumedUids.push(m.uid);
+    // Group by customer phone hash. Every recording for the same customer
+    // becomes one group → one archive row → one trajectory.
+    const groupMap = new Map<string, CustomerGroup>();
+    for (const m of allMails) {
       const customerPhone = customerPhoneOf(m.subject);
       if (!customerPhone) continue;
       const phoneHash = hashPhone(customerPhone);
-      if (donePhoneHashes.has(phoneHash)) continue;
-      const existing = groups.get(phoneHash);
+      const existing = groupMap.get(phoneHash);
       if (existing) {
         existing.mails.push(m);
       } else {
-        groups.set(phoneHash, { phoneHash, customerPhone, mails: [m] });
+        groupMap.set(phoneHash, { phoneHash, customerPhone, mails: [m] });
       }
     }
 
-    for (const group of groups.values()) {
+    const allGroups = Array.from(groupMap.values());
+
+    // Resumability: skip groups already saved in a prior run of this batch.
+    const alreadyDone = await db
+      .select({ phoneHash: conversationArchive.phoneHash })
+      .from(conversationArchive)
+      .where(eq(conversationArchive.importBatchId, batchId));
+    const donePhoneHashes = new Set(
+      alreadyDone.map((r) => r.phoneHash).filter((h): h is string => !!h)
+    );
+    const todoGroups = allGroups.filter(
+      (g) => !donePhoneHashes.has(g.phoneHash)
+    );
+
+    // itemCount reflects total mail count — this is the user-visible "how many
+    // recordings were in your range" number on the UI.
+    await db
+      .update(archiveImports)
+      .set({ itemCount: allMails.length })
+      .where(eq(archiveImports.id, batchId));
+
+    for (const group of todoGroups) {
       if (Date.now() - started > TIME_BUDGET_MS) {
         hitTimeBudget = true;
         break;
@@ -311,7 +333,6 @@ export async function runArchivePhoneBatch(
       processedCount += 1;
       if (result.ok) {
         successCount += 1;
-        donePhoneHashes.add(group.phoneHash);
       } else {
         failureCount += 1;
         console.error(
@@ -326,41 +347,53 @@ export async function runArchivePhoneBatch(
         .where(eq(archiveImports.id, batchId));
     }
 
-    if (hitTimeBudget) break;
-  }
+    const finalStatus: "processing" | "done" = hitTimeBudget
+      ? "processing"
+      : "done";
 
-  // We've drained when fetchCallRecordingsInRange returned empty. If we
-  // didn't drain AND didn't hit the time budget, something else stopped us
-  // (rare); leave status as processing for the next call.
-  const drained =
-    !hitTimeBudget && consumedUids.length > 0 &&
-    (await fetchCallRecordingsInRange({
-      from: batch.dateFrom,
-      to: batch.dateTo,
-      excludeUids: consumedUids,
-      limit: 1,
-    })).length === 0;
+    await db
+      .update(archiveImports)
+      .set({
+        processedCount,
+        successCount,
+        failureCount,
+        status: finalStatus,
+        finishedAt: finalStatus === "done" ? new Date() : null,
+      })
+      .where(eq(archiveImports.id, batchId));
 
-  const finalStatus: "processing" | "done" = drained && !hitTimeBudget ? "done" : "processing";
-
-  await db
-    .update(archiveImports)
-    .set({
+    return {
+      ok: true,
+      batchId,
+      status: finalStatus,
       processedCount,
       successCount,
       failureCount,
-      status: finalStatus,
-      finishedAt: finalStatus === "done" ? new Date() : null,
-    })
-    .where(eq(archiveImports.id, batchId));
-
-  return {
-    ok: true,
-    batchId,
-    status: finalStatus,
-    processedCount,
-    successCount,
-    failureCount,
-    hitTimeBudget,
-  };
+      hitTimeBudget,
+    };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[archive-phone] batch crashed", batchId, e);
+    await db
+      .update(archiveImports)
+      .set({
+        status: "failed",
+        error: message,
+        processedCount,
+        successCount,
+        failureCount,
+        finishedAt: new Date(),
+      })
+      .where(eq(archiveImports.id, batchId));
+    return {
+      ok: false,
+      batchId,
+      status: "failed",
+      processedCount,
+      successCount,
+      failureCount,
+      hitTimeBudget,
+      error: message,
+    };
+  }
 }

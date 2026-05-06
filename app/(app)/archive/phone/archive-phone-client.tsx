@@ -97,6 +97,15 @@ export function ArchivePhoneClient() {
           window.clearInterval(pollRef.current);
           pollRef.current = null;
         }
+      } else if (json.status === "failed") {
+        setBatch({
+          kind: "error",
+          message: json.error ?? "הריצה נכשלה",
+        });
+        if (pollRef.current) {
+          window.clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
       } else {
         setBatch({
           kind: "processing",
