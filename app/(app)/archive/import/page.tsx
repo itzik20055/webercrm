@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, Archive } from "lucide-react";
+import { ChevronLeft, Archive, Phone } from "lucide-react";
 import { db, conversationArchive } from "@/db";
 import { sql, eq, desc } from "drizzle-orm";
 import { ArchiveImportClient } from "./archive-import-client";
@@ -64,6 +64,17 @@ export default async function ArchiveImportPage() {
         <Stat label="סגרת" value={stats?.booked ?? 0} tone="emerald" />
         <Stat label="לא סגרת" value={stats?.lost ?? 0} tone="rose" />
       </div>
+
+      <Link
+        href="/archive/phone"
+        className="press flex items-center justify-between h-11 px-3.5 rounded-xl border border-border bg-card"
+      >
+        <span className="flex items-center gap-2 font-medium text-sm">
+          <Phone className="size-4" />
+          ארכיון טלפון (טווח תאריכים)
+        </span>
+        <ChevronLeft className="size-4 text-muted-foreground" />
+      </Link>
 
       <ArchiveImportClient />
 

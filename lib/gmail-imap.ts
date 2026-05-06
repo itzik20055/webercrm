@@ -220,6 +220,129 @@ export async function skipAllPastCallRecordings(): Promise<{ skipped: number }> 
 }
 
 /**
+ * Locates Gmail's localized "All Mail" folder by its `\All` special-use flag
+ * — its display name varies by UI language ("[Gmail]/All Mail", localized
+ * variants). Falls back to the English default if the flag isn't present.
+ */
+async function openAllMail(client: ImapFlow): Promise<string> {
+  const boxes = await client.list();
+  const allMail = boxes.find((b) => b.specialUse === "\\All");
+  const path = allMail?.path ?? "[Gmail]/All Mail";
+  await client.mailboxOpen(path);
+  return path;
+}
+
+/**
+ * Counts Call Recording emails in a date range. Operates on `[Gmail]/All Mail`
+ * (not the 2-day INBOX window the live cron uses) so historical runs see
+ * archived/labeled mail too. Cheap — returns UID counts only, no body fetch.
+ */
+export async function countCallRecordingsInRange(
+  from: Date,
+  to: Date
+): Promise<{ total: number; mailbox: string }> {
+  const client = await openClient();
+  try {
+    const mailbox = await openAllMail(client);
+    const uids = (await client.search({
+      from: SENDER,
+      subject: "Call Recording",
+      since: from,
+      before: nextDay(to),
+    } as never)) as number[] | null;
+    return { total: uids?.length ?? 0, mailbox };
+  } finally {
+    try {
+      await client.logout();
+    } catch {
+      /* swallow */
+    }
+  }
+}
+
+/**
+ * Pulls a window of Call Recording emails matching the date range, with full
+ * body + audio attachments. Returns up to `limit` results, ordered by UID
+ * ascending (= oldest first within the window). Caller is responsible for
+ * tracking which UIDs have been consumed across batched invocations.
+ */
+export async function fetchCallRecordingsInRange(args: {
+  from: Date;
+  to: Date;
+  excludeUids?: number[];
+  limit?: number;
+}): Promise<CallRecordingMail[]> {
+  const limit = args.limit ?? 5;
+  const skip = new Set(args.excludeUids ?? []);
+
+  const client = await openClient();
+  try {
+    await openAllMail(client);
+    const uids = (await client.search({
+      from: SENDER,
+      subject: "Call Recording",
+      since: args.from,
+      before: nextDay(args.to),
+    } as never)) as number[] | null;
+
+    const all = uids ?? [];
+    const remaining = all.filter((u) => !skip.has(u)).sort((a, b) => a - b);
+    if (remaining.length === 0) return [];
+    const take = remaining.slice(0, limit);
+
+    const results: CallRecordingMail[] = [];
+    for await (const msg of client.fetch(take, {
+      uid: true,
+      source: true,
+      envelope: true,
+    })) {
+      try {
+        const parsed: ParsedMail = await simpleParser(msg.source as Buffer);
+        const attachments = (parsed.attachments ?? [])
+          .filter(
+            (a) =>
+              a.contentType.startsWith("audio/") ||
+              /\.mp3$|\.m4a$|\.wav$/i.test(a.filename ?? "")
+          )
+          .map((a) => ({
+            filename: a.filename ?? `audio-${Date.now()}.mp3`,
+            mimeType: a.contentType || "audio/mpeg",
+            data: a.content as Buffer,
+          }));
+
+        results.push({
+          uid: msg.uid,
+          subject: parsed.subject ?? "",
+          date: parsed.date ?? new Date(),
+          from:
+            parsed.from?.value?.[0]?.address ??
+            (typeof parsed.from === "string" ? parsed.from : "") ??
+            "",
+          bodyText: parsed.text ?? "",
+          attachments,
+        });
+      } catch (e) {
+        console.error("[gmail-imap] failed to parse message", msg.uid, e);
+      }
+    }
+
+    return results;
+  } finally {
+    try {
+      await client.logout();
+    } catch {
+      /* swallow */
+    }
+  }
+}
+
+function nextDay(d: Date): Date {
+  const next = new Date(d);
+  next.setDate(next.getDate() + 1);
+  return next;
+}
+
+/**
  * Records the given UIDs in the DB so future cron runs skip them. Trim the
  * stored list to the most recent N UIDs so the row stays small.
  */
