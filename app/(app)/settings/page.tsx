@@ -11,6 +11,7 @@ import {
   Phone,
   CheckCircle2,
   AlertTriangle,
+  Archive,
 } from "lucide-react";
 import { db, pushSubscriptions, leads, productKb } from "@/db";
 import { sql } from "drizzle-orm";
@@ -105,6 +106,21 @@ export default async function SettingsPage() {
             </span>
           )}
         </div>
+      </Section>
+
+      <Section title="ארכיון שיחות (למידה)" icon={<Archive className="size-4" />}>
+        <p className="text-sm text-muted-foreground">
+          העלה שיחות וואטסאפ מהעבר כדי שה-AI ילמד דפוסי לקוחות, התנגדויות,
+          ומה מוכר. שיחות מהארכיון לא נכנסות לתור הלידים — רק נשלפות בזמן
+          ניסוח טיוטה.
+        </p>
+        <Link
+          href="/archive/import"
+          className="press flex items-center justify-between h-11 px-3.5 rounded-xl border border-border bg-background"
+        >
+          <span className="font-medium text-sm">פתח את עמוד הארכיון</span>
+          <ChevronLeft className="size-4 text-muted-foreground" />
+        </Link>
       </Section>
 
       <Section title="הקלטות שיחה" icon={<Phone className="size-4" />}>

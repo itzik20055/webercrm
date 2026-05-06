@@ -7,6 +7,7 @@ import {
   appSettings,
   productKb,
   voiceExamples,
+  conversationArchive,
   type Lead,
   type Interaction,
 } from "@/db";
@@ -306,6 +307,126 @@ async function retrieveVoiceExamples(args: {
     .orderBy(desc(voiceExamples.createdAt))
     .limit(limit);
   return { positive, negative: [] };
+}
+
+/**
+ * Pulls the top archived conversations whose extracted archetype is closest
+ * to the current lead's positioning. Used at draft time to surface "lids
+ * similar to this one — here's what worked with them last year". Hard-filters
+ * by audience + language so we don't bleed Israeli-haredi insights into a
+ * draft for an American customer. Soft-filters to outcomes the user labeled
+ * as `booked` (or that the extractor inferred with high confidence).
+ *
+ * Embedding match is on the archive row's persona/winning-angle summary, not
+ * the full transcript — this keeps cosine retrieval focused on the things
+ * that actually drive sales rather than incidental phrasing.
+ */
+const ARCHIVE_PEERS_LIMIT = 3;
+const ARCHIVE_OUTCOME_CONF_FLOOR = 0.6;
+
+interface ArchivePeer {
+  archetype: unknown;
+  outcome: "booked" | "lost" | "unknown";
+  outcomeConfidence: number;
+}
+
+async function retrieveArchivePeers(args: {
+  audience: Lead["audience"];
+  language: Lead["language"];
+  query: string;
+}): Promise<ArchivePeer[]> {
+  if (!args.query.trim()) return [];
+  let queryEmbedding: number[];
+  try {
+    queryEmbedding = await embedOne(args.query);
+  } catch {
+    return [];
+  }
+  const distance = cosineDistance(conversationArchive.embedding, queryEmbedding);
+  try {
+    const rows = await db
+      .select({
+        archetype: conversationArchive.archetype,
+        outcome: conversationArchive.outcome,
+        outcomeConfidence: conversationArchive.outcomeConfidence,
+      })
+      .from(conversationArchive)
+      .where(
+        and(
+          eq(conversationArchive.audience, args.audience),
+          eq(conversationArchive.language, args.language),
+          eq(conversationArchive.outcome, "booked"),
+          gte(conversationArchive.outcomeConfidence, ARCHIVE_OUTCOME_CONF_FLOOR),
+          isNotNull(conversationArchive.embedding)
+        )
+      )
+      .orderBy(distance)
+      .limit(ARCHIVE_PEERS_LIMIT);
+    return rows;
+  } catch (e) {
+    console.error("[archive] retrieval failed", e);
+    return [];
+  }
+}
+
+interface ArchiveArchetypeShape {
+  persona?: {
+    community?: string | null;
+    religiosity?: string;
+    decisionMakers?: string[];
+    familySizeRange?: string;
+    notes?: string | null;
+  };
+  interestDrivers?: string[];
+  objections?: string[];
+  winningAngle?: string | null;
+  followUpCadence?: {
+    daysAfterSilence?: number | null;
+    channel?: string;
+    trigger?: string | null;
+  };
+  freeFormInsights?: string;
+}
+
+function formatArchivePeer(peer: ArchivePeer, idx: number): string {
+  const a = peer.archetype as ArchiveArchetypeShape;
+  const personaLine = [
+    a.persona?.community ? `קהילה: ${a.persona.community}` : null,
+    a.persona?.religiosity ? `רמת הקפדה: ${a.persona.religiosity}` : null,
+    a.persona?.familySizeRange ? `גודל קבוצה: ${a.persona.familySizeRange}` : null,
+    a.persona?.decisionMakers?.length
+      ? `מקבלי החלטה: ${a.persona.decisionMakers.join(", ")}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const interests = a.interestDrivers?.length
+    ? `מה משך אותם: ${a.interestDrivers.join(", ")}`
+    : null;
+  const objections = a.objections?.length
+    ? `התנגדויות: ${a.objections.join(", ")}`
+    : null;
+  const winning = a.winningAngle ? `המהלך שסגר: ${a.winningAngle}` : null;
+  const cadence =
+    a.followUpCadence?.daysAfterSilence != null
+      ? `פאלו אפ שעבד: אחרי ${a.followUpCadence.daysAfterSilence} ימי שתיקה דרך ${a.followUpCadence.channel ?? "?"}${
+          a.followUpCadence.trigger ? ` (${a.followUpCadence.trigger})` : ""
+        }`
+      : null;
+  const insight = a.freeFormInsights ? `תובנה: ${a.freeFormInsights}` : null;
+
+  return [
+    `### דומה ${idx + 1}`,
+    personaLine,
+    interests,
+    objections,
+    winning,
+    cadence,
+    insight,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /**
@@ -1131,7 +1252,7 @@ export async function buildDraftPrompts(
     .filter(Boolean)
     .join("\n");
 
-  const [examples, knowledge, rules] = await Promise.all([
+  const [examples, knowledge, rules, archivePeers] = await Promise.all([
     retrieveVoiceExamples({
       scenario,
       audience: lead.audience,
@@ -1140,6 +1261,11 @@ export async function buildDraftPrompts(
     }),
     retrieveKnowledgeForQuery(ragQuery),
     loadAiRules(),
+    retrieveArchivePeers({
+      audience: lead.audience,
+      language: lead.language,
+      query: ragQuery,
+    }),
   ]);
   const knowledgeBlock = knowledge
     ? `\n\n--- ידע על המוצר (השתמש בעובדות מכאן בלבד) ---\n\n${knowledge}\n\n--- סוף ---\n`
@@ -1163,6 +1289,13 @@ export async function buildDraftPrompts(
               `### אנטי־דוגמה ${i + 1} (ציון ${e.score.toFixed(2)})\n${e.finalText}`
           )
           .join("\n\n")}\n\n--- סוף אנטי־דוגמאות ---\n`
+      : "";
+
+  const archiveBlock =
+    archivePeers.length > 0
+      ? `\n\n--- לידים דומים מהארכיון (לידים שנסגרו עם פרופיל קרוב — השתמש כדי להבין איזה כיוון לקחת, לא להעתיק טקסט) ---\n\n${archivePeers
+          .map((p, i) => formatArchivePeer(p, i))
+          .join("\n\n")}\n\n--- סוף ארכיון ---\n`
       : "";
 
   const interactionsBlock =
@@ -1223,7 +1356,7 @@ export async function buildDraftPrompts(
 6. ${langInstruction}
 
 החזר את הטיוטה כטקסט בלבד — בלי הקדמות, בלי הסברים, בלי כותרות, בלי מירכאות סוגרות. רק הטקסט שאיציק יוכל להעתיק ולשלוח.
-${rulesBlock(rules)}${knowledgeBlock}${positiveBlock}${negativeBlock}`;
+${rulesBlock(rules)}${knowledgeBlock}${positiveBlock}${negativeBlock}${archiveBlock}`;
 
   const userPrompt = `### תרחיש: ${scenario}
 ${SCENARIO_GUIDANCE[scenario]}
