@@ -7,6 +7,57 @@ import { anonymize } from "./anonymize";
 import type { Lead } from "@/db";
 
 /**
+ * NER pass — pulls every personal name out of the transcript so the main
+ * extractor sees `[NAME]` / `[NAME_2]` placeholders instead of the actual
+ * names. Without this, archived phone calls (which have no associated lead
+ * and thus no caller-supplied name list) leaked customer names into both
+ * the LLM prompt and the persisted `transcript` column. We do a separate
+ * Sonnet call rather than enriching the main schema because (a) the main
+ * extractor sees the anonymized text, so it cannot also extract names, and
+ * (b) keeping the steps separate makes the audit trail clean: anonymize
+ * happens before any model sees the raw conversation.
+ */
+const NameExtractionSchema = z.object({
+  humanNames: z
+    .array(z.string())
+    .describe(
+      "כל שם פרטי או שם פרטי+משפחה של אדם אנושי שמוזכר בתמליל. כולל הלקוח, אנשי משפחה, חברים, רבנים שמוזכרים. **חשוב**: אם אדם מוזכר גם בשם המלא וגם בשם פרטי בלבד — החזר את שתי הצורות (כדי שכל מופע יוסתר). דוגמה: אם בתמליל יש 'אברהם משה כהן' פעם אחת ו-'אברהם' פעם אחרת, החזר ['אברהם משה כהן', 'אברהם']. אל תכלול: שמות מקומות (תל אביב, סנט אנטון), שמות מותגים (Weber Tours, FreeTelecom), כינויי מקצוע (אמן, מוכר, לקוח), או שמות חברות. אם אין שמות — מערך ריק."
+    ),
+});
+
+async function extractHumanNames(transcript: string): Promise<string[]> {
+  try {
+    const { object } = await generateObject({
+      model: MODELS.extract,
+      schema: NameExtractionSchema,
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content:
+            "אתה ממיר טקסט שיחה לרשימת שמות פרטיים של בני אדם. החזר אך ורק שמות אנושיים שמוזכרים בפועל בתמליל. אל תמציא שמות.",
+        },
+        { role: "user", content: transcript },
+      ],
+    });
+    // Dedup + trim + drop empty
+    const cleaned = Array.from(
+      new Set(
+        object.humanNames
+          .map((n) => n.trim())
+          .filter((n) => n.length >= 2 && n.length <= 60)
+      )
+    );
+    return cleaned;
+  } catch {
+    // If NER fails we still proceed — the regex anonymizer will at least
+    // strip phones/emails. Better to ingest with reduced anonymization than
+    // to lose the conversation.
+    return [];
+  }
+}
+
+/**
  * Hybrid extraction shape. Structured fields below are the ones the chat will
  * retrieve explicitly during draft generation; `freeFormInsights` catches
  * anything noteworthy that didn't fit the schema. Both contribute to the
@@ -174,7 +225,16 @@ export async function extractArchivedConversation(
   args: ExtractArgs
 ): Promise<ExtractedConversation> {
   const scrubbed = scrubArchiveText(args.rawTranscript);
-  const { anonymized } = anonymize(scrubbed.text, args.knownNames ?? []);
+
+  // Run NER on the scrubbed transcript and merge with any names the caller
+  // passed in (e.g. WhatsApp's inferredLeadName). The merged list is what
+  // gets fed to the regex anonymizer.
+  const callerNames = args.knownNames ?? [];
+  const detectedNames = await extractHumanNames(scrubbed.text);
+  const mergedNames = Array.from(
+    new Set([...callerNames, ...detectedNames].map((n) => n.trim()).filter(Boolean))
+  );
+  const { anonymized } = anonymize(scrubbed.text, mergedNames);
 
   const userMessage = [
     `קהל: ${args.audience}`,

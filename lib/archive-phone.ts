@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   db,
   archiveImports,
@@ -204,13 +204,19 @@ async function processCustomerGroup(
 
   // The unique index `conversation_archive_batch_phone_uq` on
   // (importBatchId, phoneHash) is the safety net against any race that slips
-  // past the donePhoneHashes filter. Returning [] means the row already
-  // existed — treat as a benign no-op.
+  // past the donePhoneHashes filter. The index is partial (WHERE both columns
+  // are not null), so the ON CONFLICT spec must echo that WHERE clause for
+  // Postgres to match it — otherwise we get "no unique or exclusion
+  // constraint matching the ON CONFLICT specification". Returning [] means
+  // the row already existed — treat as a benign no-op.
   const inserted = await db
     .insert(conversationArchive)
     .values(insertValues)
     .onConflictDoNothing({
       target: [conversationArchive.importBatchId, conversationArchive.phoneHash],
+      // `where` on onConflictDoNothing maps to the index-WHERE match clause,
+      // which is what Postgres needs to recognize a partial unique index.
+      where: sql`${conversationArchive.importBatchId} is not null and ${conversationArchive.phoneHash} is not null`,
     })
     .returning({ id: conversationArchive.id });
 
