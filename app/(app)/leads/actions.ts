@@ -102,6 +102,9 @@ export async function createLead(formData: FormData) {
   redirect(`/leads/${created.id}`);
 }
 
+const emptyToNull = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((v) => (v === "" ? null : v), schema);
+
 const updateSchema = z.object({
   id: z.string().uuid(),
   expectedUpdatedAt: z.coerce.date(),
@@ -127,13 +130,13 @@ const updateSchema = z.object({
     ])
     .optional(),
   priority: z.enum(["hot", "warm", "cold"]).optional(),
-  numAdults: z.coerce.number().int().min(0).nullish(),
-  numChildren: z.coerce.number().int().min(0).nullish(),
+  numAdults: emptyToNull(z.coerce.number().int().min(0).nullish()),
+  numChildren: emptyToNull(z.coerce.number().int().min(0).nullish()),
   agesChildren: z.string().max(120).nullish(),
   datesInterest: z.string().max(120).nullish(),
   roomTypeInterest: z.string().max(120).nullish(),
-  buildingPref: z.enum(["a", "b", "any"]).nullish(),
-  budgetSignal: z.enum(["low", "mid", "high"]).nullish(),
+  buildingPref: emptyToNull(z.enum(["a", "b", "any"]).nullish()),
+  budgetSignal: emptyToNull(z.enum(["low", "mid", "high"]).nullish()),
   whatSpokeToThem: z.string().max(1000).nullish(),
   objections: z.string().max(1000).nullish(),
   source: z.string().max(120).nullish(),
@@ -306,9 +309,6 @@ export async function scheduleFollowup(formData: FormData) {
   revalidatePath("/queue");
   revalidatePath("/");
 }
-
-const emptyToNull = <T extends z.ZodTypeAny>(schema: T) =>
-  z.preprocess((v) => (v === "" ? null : v), schema);
 
 const importSchema = z.object({
   name: z.string().min(1).max(120),
