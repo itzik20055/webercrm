@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Plus, Search, Users, Phone, MessageCircle, Sparkles } from "lucide-react";
+import { Plus, Search, Users, Phone, MessageCircle, Sparkles, Calendar } from "lucide-react";
 import { db, leads } from "@/db";
-import { and, count, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, isNotNull, sql, type SQL } from "drizzle-orm";
 import { leadSearchCondition } from "@/lib/lead-search";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, PriorityBadge } from "@/components/status-badge";
@@ -11,15 +11,25 @@ import { StatusFilters } from "./status-filters";
 
 export const dynamic = "force-dynamic";
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export default async function LeadsListPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string; priority?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    status?: string;
+    priority?: string;
+    arrivalFrom?: string;
+    arrivalTo?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const q = (sp.q ?? "").trim();
   const statusFilter = sp.status ?? "active";
   const priorityFilter = sp.priority;
+  const arrivalFrom = ISO_DATE_RE.test(sp.arrivalFrom ?? "") ? sp.arrivalFrom! : "";
+  const arrivalTo = ISO_DATE_RE.test(sp.arrivalTo ?? "") ? sp.arrivalTo! : "";
 
   const conds: SQL[] = [];
   if (q) {
@@ -35,6 +45,19 @@ export default async function LeadsListPage({
   }
   if (priorityFilter === "hot" || priorityFilter === "warm" || priorityFilter === "cold") {
     conds.push(eq(leads.priority, priorityFilter));
+  }
+  // Range overlap: lead's [start..end] overlaps query [from..to] iff
+  //   start <= to  AND  end >= from
+  // Either bound being omitted means "open-ended on that side".
+  if (arrivalFrom || arrivalTo) {
+    conds.push(isNotNull(leads.arrivalDateStart));
+    conds.push(isNotNull(leads.arrivalDateEnd));
+    if (arrivalTo) {
+      conds.push(sql`${leads.arrivalDateStart} <= ${arrivalTo}::date`);
+    }
+    if (arrivalFrom) {
+      conds.push(sql`${leads.arrivalDateEnd} >= ${arrivalFrom}::date`);
+    }
   }
 
   const where = conds.length ? and(...conds) : undefined;
@@ -76,29 +99,65 @@ export default async function LeadsListPage({
         </div>
       </header>
 
-      <form className="relative" role="search">
-        <label htmlFor="leads-search" className="sr-only">
-          חיפוש לידים
-        </label>
-        <Search
-          className="absolute right-3.5 top-1/2 -translate-y-1/2 size-[18px] text-muted-foreground pointer-events-none"
-          aria-hidden="true"
-        />
-        <input
-          id="leads-search"
-          name="q"
-          type="search"
-          defaultValue={q}
-          placeholder="חיפוש שם, טלפון, מייל…"
-          className="w-full h-12 pr-11 pl-4 rounded-2xl border border-border bg-card text-[15px] shadow-soft placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition"
-        />
+      <form className="space-y-2" role="search">
+        <div className="relative">
+          <label htmlFor="leads-search" className="sr-only">
+            חיפוש לידים
+          </label>
+          <Search
+            className="absolute right-3.5 top-1/2 -translate-y-1/2 size-[18px] text-muted-foreground pointer-events-none"
+            aria-hidden="true"
+          />
+          <input
+            id="leads-search"
+            name="q"
+            type="search"
+            defaultValue={q}
+            placeholder="חיפוש שם, טלפון, מייל…"
+            className="w-full h-12 pr-11 pl-4 rounded-2xl border border-border bg-card text-[15px] shadow-soft placeholder:text-muted-foreground/70 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition"
+          />
+        </div>
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-card shadow-soft pr-3">
+          <Calendar
+            className="size-[16px] text-muted-foreground shrink-0"
+            aria-hidden="true"
+          />
+          <div className="flex-1 flex items-center gap-1 text-[13px]">
+            <label htmlFor="leads-arrival-from" className="text-muted-foreground shrink-0">
+              הגעה בין
+            </label>
+            <input
+              id="leads-arrival-from"
+              name="arrivalFrom"
+              type="date"
+              defaultValue={arrivalFrom}
+              dir="ltr"
+              className="flex-1 min-w-0 h-10 px-1 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-md"
+            />
+            <span className="text-muted-foreground shrink-0">לבין</span>
+            <input
+              id="leads-arrival-to"
+              name="arrivalTo"
+              type="date"
+              defaultValue={arrivalTo}
+              dir="ltr"
+              className="flex-1 min-w-0 h-10 px-1 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-md"
+            />
+          </div>
+        </div>
         {statusFilter !== "active" && (
           <input type="hidden" name="status" value={statusFilter} />
         )}
         {priorityFilter && <input type="hidden" name="priority" value={priorityFilter} />}
       </form>
 
-      <StatusFilters q={q} priority={priorityFilter} active={statusFilter} />
+      <StatusFilters
+        q={q}
+        priority={priorityFilter}
+        arrivalFrom={arrivalFrom}
+        arrivalTo={arrivalTo}
+        active={statusFilter}
+      />
 
       <p className="text-xs font-medium text-muted-foreground px-1 tabular-nums">
         {truncated

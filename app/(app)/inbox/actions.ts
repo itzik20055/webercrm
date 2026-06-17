@@ -33,6 +33,15 @@ async function supersedeOpenFollowups(leadId: string) {
 const emptyToNull = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((v) => (v === "" ? null : v), schema);
 
+// yyyy-MM-dd (HTML date input). Coerce empty string → null.
+const dateString = z.preprocess(
+  (v) => (v === "" || v == null ? null : v),
+  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "תאריך לא תקין")
+    .nullish()
+);
+
 const approveSchema = z.object({
   name: z.string().min(1).max(120),
   phone: z.string().min(5).max(40),
@@ -56,6 +65,8 @@ const approveSchema = z.object({
   numChildren: emptyToNull(z.coerce.number().int().min(0).nullish()),
   agesChildren: z.string().nullish(),
   datesInterest: z.string().nullish(),
+  arrivalDateStart: dateString,
+  arrivalDateEnd: dateString,
   roomTypeInterest: z.string().nullish(),
   budgetSignal: emptyToNull(z.enum(["low", "mid", "high"]).nullish()),
   interestTags: z.array(z.string()).default([]),
@@ -64,6 +75,12 @@ const approveSchema = z.object({
   followupAt: z.string().nullish(),
   followupReason: z.string().nullish(),
 });
+
+function parseDateOrNull(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const d = new Date(`${s}T00:00:00`);
+  return isNaN(d.getTime()) ? null : d;
+}
 
 /**
  * Apply the user-edited form values to a lead pending review. Whatever the
@@ -108,6 +125,8 @@ export async function approvePendingExtraction(
       numChildren: parsed.numChildren ?? null,
       agesChildren: parsed.agesChildren ?? null,
       datesInterest: parsed.datesInterest ?? null,
+      arrivalDateStart: parseDateOrNull(parsed.arrivalDateStart),
+      arrivalDateEnd: parseDateOrNull(parsed.arrivalDateEnd),
       roomTypeInterest: parsed.roomTypeInterest ?? null,
       budgetSignal: parsed.budgetSignal ?? null,
       interestTags: parsed.interestTags,
@@ -242,6 +261,8 @@ export async function approveCallRecording(
       numChildren: parsed.numChildren ?? null,
       agesChildren: parsed.agesChildren ?? null,
       datesInterest: parsed.datesInterest ?? null,
+      arrivalDateStart: parseDateOrNull(parsed.arrivalDateStart),
+      arrivalDateEnd: parseDateOrNull(parsed.arrivalDateEnd),
       roomTypeInterest: parsed.roomTypeInterest ?? null,
       budgetSignal: parsed.budgetSignal ?? null,
       interestTags: parsed.interestTags,
@@ -292,7 +313,7 @@ export async function approveCallRecording(
   revalidatePath("/queue");
   revalidatePath("/leads");
   revalidatePath("/");
-  redirect(`/leads/${created.id}`);
+  redirect("/inbox");
 }
 
 // Merging into an existing lead — the target already has name/phone, and the
@@ -336,6 +357,16 @@ export async function mergeCallRecording(
   fillIfEmpty("numChildren", existing.numChildren, parsed.numChildren);
   fillIfEmpty("agesChildren", existing.agesChildren, parsed.agesChildren);
   fillIfEmpty("datesInterest", existing.datesInterest, parsed.datesInterest);
+  fillIfEmpty(
+    "arrivalDateStart",
+    existing.arrivalDateStart,
+    parseDateOrNull(parsed.arrivalDateStart)
+  );
+  fillIfEmpty(
+    "arrivalDateEnd",
+    existing.arrivalDateEnd,
+    parseDateOrNull(parsed.arrivalDateEnd)
+  );
   fillIfEmpty("roomTypeInterest", existing.roomTypeInterest, parsed.roomTypeInterest);
   fillIfEmpty("budgetSignal", existing.budgetSignal, parsed.budgetSignal);
   fillIfEmpty("whatSpokeToThem", existing.whatSpokeToThem, parsed.whatSpokeToThem);
@@ -421,7 +452,7 @@ export async function mergeCallRecording(
   revalidatePath("/leads");
   revalidatePath(`/leads/${parsed.leadId}`);
   revalidatePath("/");
-  redirect(`/leads/${parsed.leadId}`);
+  redirect("/inbox");
 }
 
 export async function dismissCallRecording(pendingId: string) {
@@ -560,7 +591,7 @@ export async function mergeEmailBatch(importId: string) {
   revalidatePath("/queue");
   revalidatePath(`/leads/${row.leadId}`);
   revalidatePath("/");
-  redirect(`/leads/${row.leadId}`);
+  redirect("/inbox");
 }
 
 const emailApproveSchema = z.object({
@@ -582,6 +613,8 @@ const emailApproveSchema = z.object({
   numChildren: z.preprocess((v) => (v === "" ? null : v), z.coerce.number().int().min(0).nullish()),
   agesChildren: z.string().nullish(),
   datesInterest: z.string().nullish(),
+  arrivalDateStart: dateString,
+  arrivalDateEnd: dateString,
   roomTypeInterest: z.string().nullish(),
   budgetSignal: z.preprocess(
     (v) => (v === "" ? null : v),
@@ -644,6 +677,8 @@ export async function approveEmailImport(importId: string, formData: FormData) {
       numChildren: parsed.numChildren ?? null,
       agesChildren: parsed.agesChildren ?? null,
       datesInterest: parsed.datesInterest ?? null,
+      arrivalDateStart: parseDateOrNull(parsed.arrivalDateStart),
+      arrivalDateEnd: parseDateOrNull(parsed.arrivalDateEnd),
       roomTypeInterest: parsed.roomTypeInterest ?? null,
       budgetSignal: parsed.budgetSignal ?? null,
       interestTags: parsed.interestTags,
@@ -682,7 +717,7 @@ export async function approveEmailImport(importId: string, formData: FormData) {
   revalidatePath("/queue");
   revalidatePath("/leads");
   revalidatePath("/");
-  redirect(`/leads/${created.id}`);
+  redirect("/inbox");
 }
 
 const emailMergeSchema = emailApproveSchema
@@ -737,6 +772,16 @@ export async function mergeEmailImport(importId: string, formData: FormData) {
   fillIfEmpty("numChildren", existing.numChildren, parsed.numChildren);
   fillIfEmpty("agesChildren", existing.agesChildren, parsed.agesChildren);
   fillIfEmpty("datesInterest", existing.datesInterest, parsed.datesInterest);
+  fillIfEmpty(
+    "arrivalDateStart",
+    existing.arrivalDateStart,
+    parseDateOrNull(parsed.arrivalDateStart)
+  );
+  fillIfEmpty(
+    "arrivalDateEnd",
+    existing.arrivalDateEnd,
+    parseDateOrNull(parsed.arrivalDateEnd)
+  );
   fillIfEmpty("roomTypeInterest", existing.roomTypeInterest, parsed.roomTypeInterest);
   fillIfEmpty("budgetSignal", existing.budgetSignal, parsed.budgetSignal);
   fillIfEmpty("whatSpokeToThem", existing.whatSpokeToThem, parsed.whatSpokeToThem);
@@ -817,6 +862,6 @@ export async function mergeEmailImport(importId: string, formData: FormData) {
   revalidatePath("/leads");
   revalidatePath(`/leads/${parsed.leadId}`);
   revalidatePath("/");
-  redirect(`/leads/${parsed.leadId}`);
+  redirect("/inbox");
 }
 

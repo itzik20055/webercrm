@@ -22,23 +22,29 @@ const SECONDARY: Filter[] = [
 ];
 
 function buildHref(
-  base: { q?: string; priority?: string },
+  base: { q?: string; priority?: string; arrivalFrom?: string; arrivalTo?: string },
   status: string
 ): string {
   const params = new URLSearchParams();
   if (base.q) params.set("q", base.q);
   params.set("status", status);
   if (base.priority) params.set("priority", base.priority);
+  if (base.arrivalFrom) params.set("arrivalFrom", base.arrivalFrom);
+  if (base.arrivalTo) params.set("arrivalTo", base.arrivalTo);
   return `/leads?${params}`;
 }
 
 export function StatusFilters({
   q,
   priority,
+  arrivalFrom,
+  arrivalTo,
   active,
 }: {
   q?: string;
   priority?: string;
+  arrivalFrom?: string;
+  arrivalTo?: string;
   active: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -63,7 +69,7 @@ export function StatusFilters({
   }, [open]);
 
   const activeSecondary = SECONDARY.find((f) => f.v === active);
-  const base = { q, priority };
+  const base = { q, priority, arrivalFrom, arrivalTo };
 
   const pillCls = (isActive: boolean) =>
     "press px-3.5 h-9 rounded-full text-[13px] font-semibold whitespace-nowrap flex items-center transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background " +

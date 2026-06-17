@@ -593,6 +593,18 @@ const ExtractedLeadSchema = z.object({
     .string()
     .nullable()
     .describe("Dates they showed interest in, e.g. '1-7 August'"),
+  arrivalDateStart: z
+    .string()
+    .nullable()
+    .describe(
+      "Arrival date in ISO yyyy-MM-dd format, parsed from datesInterest when possible. For a Hebrew holiday like 'סוכות 2026', use the first day of the holiday. For '26-30/9/2026' use 2026-09-26. Return null if no specific date can be inferred (e.g. they said only 'קיץ' or 'חופש גדול' without a year)."
+    ),
+  arrivalDateEnd: z
+    .string()
+    .nullable()
+    .describe(
+      "Departure / end-of-stay date in ISO yyyy-MM-dd. Inclusive. For a single-night stay equal to arrivalDateStart. For a holiday range use the last day of the holiday. Return null if not inferable."
+    ),
   roomTypeInterest: z.string().nullable(),
   budgetSignal: z.enum(["low", "mid", "high"]).nullable(),
   interestTags: z
@@ -746,6 +758,18 @@ export async function extractLeadFromChat(
 
 11. **פורמט שדות טקסט**: כתוב בעברית רגילה בלבד, ללא תווי escape כמו "\\n" או "\\t". להפרדה בין בולטים ב-summary, השתמש בתו "•" עם רווח ("• בולט ראשון • בולט שני • בולט שלישי") — בשורה אחת רציפה. אל תכתוב את התווים \\n כטקסט.
 
+13. **תאריכי הגעה מובְנים (arrivalDateStart / arrivalDateEnd)**: בנוסף ל-datesInterest הטקסטואלי, נסה לחלץ תאריכי ISO (yyyy-MM-dd) של ההגעה הצפויה והעזיבה. דוגמאות:
+   - "26-30 בספטמבר 2026" → start=2026-09-26, end=2026-09-30
+   - "סוכות 2026" → start=2026-09-26, end=2026-10-03 (חג וחול המועד)
+   - "פסח 2027" → start=2027-04-21, end=2027-04-28
+   - "החופש הגדול" בלי שנה → null/null (אי-אפשר לדעת)
+   - "אולי באוקטובר, עוד לא יודע מתי בדיוק" → null/null (לא מספיק ספציפי)
+   חוקים:
+   - השתמש בשנה הקרובה אם לא צוינה במפורש ויש לוח עברי שאתה מזהה (סוכות הקרובים, פסח הקרוב). אם השיחה ישנה — קח את החג הסמוך לזמן השיחה.
+   - אם רק תאריך אחד הוזכר ("מגיע ב-15/9") — שים את שניהם זהים (start=end=2026-09-15).
+   - **אל תמציא**. אם אין שום רמז לתאריך — החזר null לשני השדות.
+   - תמיד פורמט ISO yyyy-MM-dd. בלי שעות, בלי אזורי זמן.
+
 10. **המלצת מועד פולואפ (suggestedFollowupHours)** — הכי חשוב:
     - **אם הלקוח אמר מתי לחזור אליו** → השתמש בזה. לדוגמה: "תתקשר אליי ביום שלישי" → חשב כמה שעות מעכשיו עד יום שלישי בבוקר. "אחרי שבת" → מוצאי שבת הקרובה. **תמיד עדיף על ניחוש.**
     - **אם הוא מחכה למשהו ספציפי** (תשובה מהאישה, אישור מטיסה, החלטה משפחתית) → 48-72 שעות. ציין את זה בסיבה.
@@ -819,6 +843,14 @@ const ReprocessProfileSchema = z.object({
   numChildren: z.number().int().nullable(),
   agesChildren: z.string().nullable(),
   datesInterest: z.string().nullable(),
+  arrivalDateStart: z
+    .string()
+    .nullable()
+    .describe("Arrival ISO yyyy-MM-dd parsed from datesInterest, or null."),
+  arrivalDateEnd: z
+    .string()
+    .nullable()
+    .describe("Departure ISO yyyy-MM-dd parsed from datesInterest, or null."),
   roomTypeInterest: z.string().nullable(),
   budgetSignal: z.enum(["low", "mid", "high"]).nullable(),
   interestTags: z.array(

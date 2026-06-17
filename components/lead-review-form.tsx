@@ -39,6 +39,8 @@ export interface ExtractedLeadData {
   numChildren: number | null;
   agesChildren: string | null;
   datesInterest: string | null;
+  arrivalDateStart: string | null;
+  arrivalDateEnd: string | null;
   roomTypeInterest: string | null;
   budgetSignal: "low" | "mid" | "high" | null;
   interestTags: string[];
@@ -444,7 +446,7 @@ export function LeadReviewForm({
             className="w-full h-11 px-3 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
           />
         </Field>
-        <Field label="תאריכים" htmlFor="lrf-dates">
+        <Field label="תאריכים (טקסט)" htmlFor="lrf-dates">
           <input
             id="lrf-dates"
             name="datesInterest"
@@ -453,6 +455,28 @@ export function LeadReviewForm({
             className="w-full h-11 px-3 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
           />
         </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="הגעה" htmlFor="lrf-arrival-start">
+            <input
+              id="lrf-arrival-start"
+              name="arrivalDateStart"
+              type="date"
+              defaultValue={extracted.arrivalDateStart ?? ""}
+              className="w-full h-11 px-3 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+              dir="ltr"
+            />
+          </Field>
+          <Field label="עזיבה" htmlFor="lrf-arrival-end">
+            <input
+              id="lrf-arrival-end"
+              name="arrivalDateEnd"
+              type="date"
+              defaultValue={extracted.arrivalDateEnd ?? ""}
+              className="w-full h-11 px-3 rounded-lg border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50"
+              dir="ltr"
+            />
+          </Field>
+        </div>
         <Field label="סוג חדר" htmlFor="lrf-room">
           <input
             id="lrf-room"

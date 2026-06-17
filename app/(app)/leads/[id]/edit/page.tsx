@@ -166,7 +166,7 @@ export default async function EditLeadPage({
               className="form-input"
             />
           </Field>
-          <Field label="תאריכים">
+          <Field label="תאריכים (טקסט)">
             <input
               name="datesInterest"
               defaultValue={lead.datesInterest ?? ""}
@@ -174,6 +174,34 @@ export default async function EditLeadPage({
               className="form-input"
             />
           </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="הגעה">
+              <input
+                name="arrivalDateStart"
+                type="date"
+                defaultValue={
+                  lead.arrivalDateStart
+                    ? toIsoDate(lead.arrivalDateStart)
+                    : ""
+                }
+                dir="ltr"
+                className="form-input"
+              />
+            </Field>
+            <Field label="עזיבה">
+              <input
+                name="arrivalDateEnd"
+                type="date"
+                defaultValue={
+                  lead.arrivalDateEnd
+                    ? toIsoDate(lead.arrivalDateEnd)
+                    : ""
+                }
+                dir="ltr"
+                className="form-input"
+              />
+            </Field>
+          </div>
           <Field label="סוג חדר">
             <input
               name="roomTypeInterest"
@@ -301,5 +329,18 @@ function Field({
       <span className="text-sm font-medium">{label}</span>
       {children}
     </label>
+  );
+}
+
+// Drizzle date columns come back as JS Date at UTC midnight; format from UTC
+// parts so the input doesn't shift a day in Asia/Jerusalem.
+function toIsoDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    d.getUTCFullYear() +
+    "-" +
+    pad(d.getUTCMonth() + 1) +
+    "-" +
+    pad(d.getUTCDate())
   );
 }

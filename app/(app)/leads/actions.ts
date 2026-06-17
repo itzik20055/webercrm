@@ -134,6 +134,21 @@ const updateSchema = z.object({
   numChildren: emptyToNull(z.coerce.number().int().min(0).nullish()),
   agesChildren: z.string().max(120).nullish(),
   datesInterest: z.string().max(120).nullish(),
+  // yyyy-MM-dd → Date (UTC midnight). Empty → null.
+  arrivalDateStart: z.preprocess((v) => {
+    if (v === "" || v == null) return null;
+    if (v instanceof Date) return v;
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v))
+      return new Date(`${v}T00:00:00Z`);
+    return v;
+  }, z.date().nullish()),
+  arrivalDateEnd: z.preprocess((v) => {
+    if (v === "" || v == null) return null;
+    if (v instanceof Date) return v;
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v))
+      return new Date(`${v}T00:00:00Z`);
+    return v;
+  }, z.date().nullish()),
   roomTypeInterest: z.string().max(120).nullish(),
   buildingPref: emptyToNull(z.enum(["a", "b", "any"]).nullish()),
   budgetSignal: emptyToNull(z.enum(["low", "mid", "high"]).nullish()),

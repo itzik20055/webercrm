@@ -120,6 +120,8 @@ function fallbackExtracted(
     numChildren: null,
     agesChildren: null,
     datesInterest: null,
+    arrivalDateStart: null,
+    arrivalDateEnd: null,
     roomTypeInterest: null,
     budgetSignal: null,
     interestTags: [],

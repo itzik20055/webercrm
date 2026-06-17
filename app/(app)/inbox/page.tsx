@@ -13,6 +13,7 @@ import {
   Mail,
   AlertTriangle,
   Loader2,
+  Calendar,
 } from "lucide-react";
 import {
   db,
@@ -40,15 +41,63 @@ import {
   telLink,
   whatsappLink,
 } from "@/lib/format";
+import { PriorityBadge } from "@/components/status-badge";
 
 export const dynamic = "force-dynamic";
 
 interface PendingExtractionLite {
   customerName?: string | null;
   summary?: string | null;
+  priority?: Lead["priority"] | null;
+  arrivalDateStart?: string | null;
+  arrivalDateEnd?: string | null;
 }
 
-export default async function InboxPage() {
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Date column → yyyy-MM-dd. Drizzle's `date({ mode: "date" })` returns a JS
+ * Date pinned to UTC midnight, so we must format from UTC components to avoid
+ * a tz-offset shift (Asia/Jerusalem → -1 day).
+ */
+function toIsoDate(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    d.getUTCFullYear() +
+    "-" +
+    pad(d.getUTCMonth() + 1) +
+    "-" +
+    pad(d.getUTCDate())
+  );
+}
+
+/**
+ * Inclusive range-overlap check. Returns true iff the lead's [leadStart..leadEnd]
+ * overlaps the filter [from..to]. If the lead has no dates → drop from filtered
+ * view (we can't know if it matches; the user explicitly asked to slice by date).
+ * If from/to are empty strings, treat as open-ended on that side.
+ */
+function dateRangeOverlaps(
+  leadStart: string | null | undefined,
+  leadEnd: string | null | undefined,
+  from: string,
+  to: string
+): boolean {
+  if (!leadStart || !leadEnd) return false;
+  if (from && leadEnd < from) return false;
+  if (to && leadStart > to) return false;
+  return true;
+}
+
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ arrivalFrom?: string; arrivalTo?: string }>;
+}) {
+  const sp = await searchParams;
+  const arrivalFrom = ISO_DATE_RE.test(sp.arrivalFrom ?? "") ? sp.arrivalFrom! : "";
+  const arrivalTo = ISO_DATE_RE.test(sp.arrivalTo ?? "") ? sp.arrivalTo! : "";
+  const dateFilterOn = Boolean(arrivalFrom || arrivalTo);
   const [pendingRecordings, reviewLeads, waImports, emailRows] = await Promise.all([
     db
       .select()
@@ -112,17 +161,58 @@ export default async function InboxPage() {
             id: leads.id,
             name: leads.name,
             email: leads.email,
+            priority: leads.priority,
+            arrivalDateStart: leads.arrivalDateStart,
+            arrivalDateEnd: leads.arrivalDateEnd,
           })
           .from(leads)
           .where(inArray(leads.id, emailLeadIds))
       : [];
   const emailLeadsById = new Map(emailLeadRows.map((l) => [l.id, l]));
 
+  // Apply date-range filter across all four sources. Pending rows read from
+  // their `extraction` JSON; review leads use their own columns; email
+  // update_batch rows borrow dates from the linked lead.
+  const dateMatch = (start: unknown, end: unknown): boolean =>
+    !dateFilterOn ||
+    dateRangeOverlaps(
+      typeof start === "string" ? start : null,
+      typeof end === "string" ? end : null,
+      arrivalFrom,
+      arrivalTo
+    );
+
+  const filteredRecordings = pendingRecordings.filter((r) => {
+    const e = r.extraction as PendingExtractionLite | null;
+    return dateMatch(e?.arrivalDateStart, e?.arrivalDateEnd);
+  });
+  const filteredReviewLeads = reviewLeads.filter((l) =>
+    dateMatch(
+      l.arrivalDateStart ? toIsoDate(l.arrivalDateStart) : null,
+      l.arrivalDateEnd ? toIsoDate(l.arrivalDateEnd) : null
+    )
+  );
+  const filteredWaImports = waImports.filter((r) => {
+    const e = r.extraction as PendingExtractionLite | null;
+    return dateMatch(e?.arrivalDateStart, e?.arrivalDateEnd);
+  });
+  const filteredEmailRows = emailRows.filter((r) => {
+    if (r.kind === "update_batch") {
+      const lead = r.leadId ? emailLeadsById.get(r.leadId) ?? null : null;
+      return dateMatch(
+        lead?.arrivalDateStart ? toIsoDate(lead.arrivalDateStart) : null,
+        lead?.arrivalDateEnd ? toIsoDate(lead.arrivalDateEnd) : null
+      );
+    }
+    const e = r.extraction as PendingExtractionLite | null;
+    return dateMatch(e?.arrivalDateStart, e?.arrivalDateEnd);
+  });
+
   const total =
-    pendingRecordings.length +
-    reviewLeads.length +
-    waImports.length +
-    emailRows.length;
+    filteredRecordings.length +
+    filteredReviewLeads.length +
+    filteredWaImports.length +
+    filteredEmailRows.length;
 
   return (
     <div className="px-4 pt-5 pb-6 space-y-5">
@@ -146,38 +236,86 @@ export default async function InboxPage() {
         )}
       </header>
 
+      <form
+        className="flex items-center gap-2 rounded-xl border border-border bg-card shadow-soft pr-3"
+        role="search"
+      >
+        <Calendar
+          className="size-[16px] text-muted-foreground shrink-0"
+          aria-hidden="true"
+        />
+        <div className="flex-1 flex items-center gap-1 text-[13px]">
+          <label
+            htmlFor="inbox-arrival-from"
+            className="text-muted-foreground shrink-0"
+          >
+            הגעה בין
+          </label>
+          <input
+            id="inbox-arrival-from"
+            name="arrivalFrom"
+            type="date"
+            defaultValue={arrivalFrom}
+            dir="ltr"
+            className="flex-1 min-w-0 h-10 px-1 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-md"
+          />
+          <span className="text-muted-foreground shrink-0">לבין</span>
+          <input
+            id="inbox-arrival-to"
+            name="arrivalTo"
+            type="date"
+            defaultValue={arrivalTo}
+            dir="ltr"
+            className="flex-1 min-w-0 h-10 px-1 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary/30 rounded-md"
+          />
+        </div>
+        {dateFilterOn && (
+          <Link
+            href="/inbox"
+            className="press h-8 px-2 rounded-full text-xs text-muted-foreground hover:text-foreground shrink-0"
+            aria-label="נקה סינון תאריכים"
+          >
+            נקה
+          </Link>
+        )}
+      </form>
+
       {total === 0 && (
         <div className="rounded-2xl bg-card border border-dashed border-border/70 p-6 text-center space-y-2">
           <CheckCircle2
             className="size-8 text-emerald-500 mx-auto"
             strokeWidth={1.8}
           />
-          <p className="font-semibold tracking-tight">התיבה ריקה</p>
+          <p className="font-semibold tracking-tight">
+            {dateFilterOn ? "אין התאמות בטווח" : "התיבה ריקה"}
+          </p>
           <p className="text-sm text-muted-foreground">
-            אין הקלטות חדשות או לידים שמחכים לאישור.
+            {dateFilterOn
+              ? "אין לידים שמתעניינים בטווח התאריכים הזה. נסה טווח רחב יותר או נקה את הסינון."
+              : "אין הקלטות חדשות או לידים שמחכים לאישור."}
           </p>
         </div>
       )}
 
-      {pendingRecordings.length > 0 && (
-        <Group title="שיחות מוקלטות" tone="primary" count={pendingRecordings.length}>
-          {pendingRecordings.map((r) => (
+      {filteredRecordings.length > 0 && (
+        <Group title="שיחות מוקלטות" tone="primary" count={filteredRecordings.length}>
+          {filteredRecordings.map((r) => (
             <PendingCallCard key={r.id} recording={r} />
           ))}
         </Group>
       )}
 
-      {waImports.length > 0 && (
-        <Group title="ייבוא וואטסאפ" tone="primary" count={waImports.length}>
-          {waImports.map((r) => (
+      {filteredWaImports.length > 0 && (
+        <Group title="ייבוא וואטסאפ" tone="primary" count={filteredWaImports.length}>
+          {filteredWaImports.map((r) => (
             <WhatsAppImportCard key={r.id} row={r} />
           ))}
         </Group>
       )}
 
-      {emailRows.length > 0 && (
-        <Group title="מיילים" tone="primary" count={emailRows.length}>
-          {emailRows.map((r) => (
+      {filteredEmailRows.length > 0 && (
+        <Group title="מיילים" tone="primary" count={filteredEmailRows.length}>
+          {filteredEmailRows.map((r) => (
             <EmailImportCard
               key={r.id}
               row={r}
@@ -187,9 +325,9 @@ export default async function InboxPage() {
         </Group>
       )}
 
-      {reviewLeads.length > 0 && (
-        <Group title="לידים מטיוטה" count={reviewLeads.length}>
-          {reviewLeads.map((l) => (
+      {filteredReviewLeads.length > 0 && (
+        <Group title="לידים מטיוטה" count={filteredReviewLeads.length}>
+          {filteredReviewLeads.map((l) => (
             <ReviewLeadCard
               key={l.id}
               lead={l}
@@ -250,6 +388,7 @@ function PendingCallCard({
   const e = recording.extraction as PendingExtractionLite | null;
   const inferredName = e?.customerName?.trim();
   const summary = e?.summary?.trim();
+  const priority = e?.priority ?? null;
   const candidateCount = recording.matchCandidateIds.length;
   const dismiss = dismissCallRecording.bind(null, recording.id);
   const DirIcon = recording.direction === "out" ? PhoneOutgoing : PhoneIncoming;
@@ -268,6 +407,7 @@ function PendingCallCard({
               <span className="font-semibold tracking-tight truncate">
                 {inferredName || recording.customerPhone}
               </span>
+              {priority && <PriorityBadge priority={priority} />}
               <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
                 <Sparkles className="size-2.5" />
                 AI
@@ -370,6 +510,7 @@ function WhatsAppImportCard({
     row.originalFilename;
   const phone = row.inferredPhones?.[0];
   const summary = extraction?.summary?.trim();
+  const priority = extraction?.priority ?? null;
   const dismiss = dismissWhatsAppImport.bind(null, row.id);
 
   const body = (
@@ -383,6 +524,7 @@ function WhatsAppImportCard({
           <span className="font-semibold tracking-tight truncate">
             {displayName}
           </span>
+          {done && priority && <PriorityBadge priority={priority} />}
           {isWorking && (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
               <Loader2 className="size-2.5 animate-spin" />
@@ -491,7 +633,14 @@ function EmailImportCard({
   lead,
 }: {
   row: PendingEmail;
-  lead: { id: string; name: string; email: string | null } | null;
+  lead: {
+    id: string;
+    name: string;
+    email: string | null;
+    priority: Lead["priority"];
+    arrivalDateStart: Date | null;
+    arrivalDateEnd: Date | null;
+  } | null;
 }) {
   const isWorking = row.status === "pending" || row.status === "processing";
   const failed = row.status === "failed";
@@ -509,6 +658,7 @@ function EmailImportCard({
   const summary = isUpdateBatch
     ? `${row.messageCount} הודעות חדשות מאז הסנכרון האחרון`
     : extraction?.summary?.trim();
+  const priority = isUpdateBatch ? lead?.priority ?? null : extraction?.priority ?? null;
 
   const dismiss = dismissEmailImport.bind(null, row.id);
   const merge = isUpdateBatch ? mergeEmailBatch.bind(null, row.id) : null;
@@ -523,6 +673,7 @@ function EmailImportCard({
           <span className="font-semibold tracking-tight truncate">
             {displayName}
           </span>
+          {priority && <PriorityBadge priority={priority} />}
           {isWorking && (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
               <Loader2 className="size-2.5 animate-spin" />
@@ -653,10 +804,11 @@ function ReviewLeadCard({
       >
         <div className="flex items-start gap-3">
           <div className="min-w-0 flex-1 space-y-1.5">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold tracking-tight truncate">
                 {lead.name}
               </span>
+              <PriorityBadge priority={lead.priority} />
               {pending && (
                 <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary-soft rounded-full px-1.5 py-0.5">
                   <Sparkles className="size-2.5" />

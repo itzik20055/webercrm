@@ -5,6 +5,7 @@ import {
   integer,
   real,
   timestamp,
+  date,
   pgEnum,
   index,
   uniqueIndex,
@@ -103,6 +104,15 @@ export const leads = pgTable(
     numChildren: integer(),
     agesChildren: text(),
     datesInterest: text(),
+    /**
+     * Structured arrival window parsed from `datesInterest` (free text → dates).
+     * Both nullable: many leads land in the inbox without a parseable date yet.
+     * Used for date-range filtering on /leads and /inbox so the user can
+     * triage by season ("everyone interested in Sukkot first"). When set, both
+     * are inclusive — a lead arriving 5-Oct..8-Oct has Start=5-Oct, End=8-Oct.
+     */
+    arrivalDateStart: date({ mode: "date" }),
+    arrivalDateEnd: date({ mode: "date" }),
     roomTypeInterest: text(),
     buildingPref: buildingEnum(),
     budgetSignal: budgetEnum(),
@@ -149,6 +159,7 @@ export const leads = pgTable(
     index("leads_priority_idx").on(t.priority),
     index("leads_created_idx").on(t.createdAt),
     index("leads_needs_review_idx").on(t.needsReview),
+    index("leads_arrival_idx").on(t.arrivalDateStart, t.arrivalDateEnd),
   ]
 );
 
